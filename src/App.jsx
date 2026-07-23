@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -13,6 +13,8 @@ function loadXLSX() {
 const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy"];
 const STATUS_APROVACAO = ["Não enviado", "Aguardando", "Aprovado", "Alteração solicitada"];
 const DEFAULT_TIPOS = ["Produção Comercial", "Institucional", "Podcast", "Motion", "Outro"];
+const DEFAULT_PROCESSOS_CATEGORIAS = ["Mensagens padrão", "Dados de pagamento", "Termos de uso de imagem", "Captação", "Edição", "Treinamentos"];
+const PROCESSO_ARQUIVO_MAX_BYTES = 25 * 1024 * 1024;
 
 const TAB_LABELS = {
   inicio: "Início",
@@ -23,6 +25,7 @@ const TAB_LABELS = {
   financeiro: "Financeiro",
   metas: "Metas",
   equipamentos: "Equipamentos",
+  processos: "Processos internos",
   calculadora: "Calculadora",
   propostas: "Gerador de Propostas",
   config: "Configurações",
@@ -574,6 +577,32 @@ function FinanceChart({ data }) {
   );
 }
 
+function isImagemArquivo(nome) {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(nome || "");
+}
+
+function ProcessoImagePreview({ doc, cache }) {
+  const [url, setUrl] = useState(cache.current.get(doc.id) || null);
+  useEffect(() => {
+    if (url || !doc.arquivoPath) return;
+    let ativo = true;
+    api
+      .downloadProcessoArquivo(doc.arquivoPath)
+      .then((blob) => {
+        if (!ativo) return;
+        const objUrl = URL.createObjectURL(blob);
+        cache.current.set(doc.id, objUrl);
+        setUrl(objUrl);
+      })
+      .catch((e) => console.error("Falha ao carregar preview", e));
+    return () => {
+      ativo = false;
+    };
+  }, [doc.id, doc.arquivoPath]);
+  if (!url) return <div className="processo-img-loading">Carregando imagem…</div>;
+  return <img src={url} alt={doc.titulo} className="processo-img-preview" />;
+}
+
 function KanbanBoard({ tasks, clients, onAdd, onToggle, onDelete, onMove, onUpdate }) {
   const [weekAnchor, setWeekAnchor] = useState(todayISO());
   const [addingDay, setAddingDay] = useState(null);
@@ -791,6 +820,14 @@ export default function App() {
   const [equipFiltroCategoria, setEquipFiltroCategoria] = useState("");
   const [equipFiltroStatus, setEquipFiltroStatus] = useState("");
   const equipFileInputRef = useRef(null);
+  const [processosCategorias, setProcessosCategorias] = useState([]);
+  const [processosDocumentos, setProcessosDocumentos] = useState([]);
+  const [processoForm, setProcessoForm] = useState(null);
+  const [processoNovoArquivo, setProcessoNovoArquivo] = useState(null);
+  const [novaCategoriaProcessoInput, setNovaCategoriaProcessoInput] = useState("");
+  const [processoFiltroCategoria, setProcessoFiltroCategoria] = useState("");
+  const processoPreviewUrls = useRef(new Map());
+  const processoFileInputRef = useRef(null);
 
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -822,6 +859,13 @@ export default function App() {
         load("meta de clientes", api.listMetasClientesMensais, setMetasClientesNovos, {}),
         load("tags", api.listTags, setTags, []),
         load("equipamentos", api.listEquipamentos, setEquipamentos, []),
+        load(
+          "categorias de processos",
+          () => api.seedProcessosCategoriasSeVazio(DEFAULT_PROCESSOS_CATEGORIAS),
+          setProcessosCategorias,
+          DEFAULT_PROCESSOS_CATEGORIAS
+        ),
+        load("documentos de processos", api.listProcessosDocumentos, setProcessosDocumentos, []),
       ]);
       setLoading(false);
     })();
@@ -1254,6 +1298,118 @@ export default function App() {
       }
     };
     reader.readAsArrayBuffer(file);
+  }
+
+  async function persistProcessosCategorias(list) {
+    const prev = processosCategorias;
+    setProcessosCategorias(list);
+    try {
+      await api.syncProcessosCategorias(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar categorias de processos", e);
+    }
+  }
+
+  function addProcessoCategoria(nome) {
+    const limpo = nome.trim();
+    if (!limpo || processosCategorias.includes(limpo)) return;
+    persistProcessosCategorias([...processosCategorias, limpo]);
+  }
+
+  function removeProcessoCategoria(nome) {
+    persistProcessosCategorias(processosCategorias.filter((c) => c !== nome));
+    if (processoFiltroCategoria === nome) setProcessoFiltroCategoria("");
+  }
+
+  async function persistProcessosDocumentos(list) {
+    const prev = processosDocumentos;
+    setProcessosDocumentos(list);
+    try {
+      await api.syncProcessosDocumentos(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar documentos de processos", e);
+    }
+  }
+
+  async function saveProcessoDocumento(doc, novoArquivo) {
+    let arquivoPath = doc.arquivoPath;
+    let arquivoNome = doc.arquivoNome;
+    if (novoArquivo) {
+      if (novoArquivo.size > PROCESSO_ARQUIVO_MAX_BYTES) {
+        setToast("Arquivo maior que 25MB — escolha um arquivo menor.");
+        setTimeout(() => setToast(null), 6000);
+        return;
+      }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const antigo = arquivoPath;
+        const up = await api.uploadProcessoArquivo(user.id, doc.id, novoArquivo);
+        arquivoPath = up.path;
+        arquivoNome = up.nome;
+        if (antigo && antigo !== arquivoPath) await api.deleteProcessoArquivo(antigo);
+      } catch (e) {
+        console.error("Falha ao enviar arquivo", e);
+        setToast("Não consegui enviar o arquivo. Tenta de novo.");
+        setTimeout(() => setToast(null), 6000);
+        return;
+      }
+    }
+    const registro = { ...doc, arquivoPath, arquivoNome };
+    const exists = processosDocumentos.some((d) => d.id === registro.id);
+    const list = exists ? processosDocumentos.map((d) => (d.id === registro.id ? registro : d)) : [registro, ...processosDocumentos];
+    persistProcessosDocumentos(list);
+    setProcessoForm(null);
+    setProcessoNovoArquivo(null);
+  }
+
+  function removeProcessoDocumento(doc) {
+    (async () => {
+      if (doc.arquivoPath) {
+        try {
+          await api.deleteProcessoArquivo(doc.arquivoPath);
+        } catch (e) {
+          console.error("Falha ao remover arquivo do storage", e);
+        }
+      }
+      persistProcessosDocumentos(processosDocumentos.filter((d) => d.id !== doc.id));
+    })();
+    setConfirmDelete(null);
+  }
+
+  async function baixarArquivoProcesso(doc) {
+    try {
+      const blob = await api.downloadProcessoArquivo(doc.arquivoPath);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.arquivoNome || "arquivo";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Falha ao baixar arquivo", e);
+      setToast("Não consegui baixar esse arquivo.");
+      setTimeout(() => setToast(null), 6000);
+    }
+  }
+
+  function baixarTextoProcesso(doc) {
+    const blob = new Blob([doc.conteudoTexto || ""], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (doc.titulo || "documento").replace(/[^a-z0-9\-_ ]/gi, "") + ".txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function copiarTextoProcesso(doc) {
+    navigator.clipboard.writeText(doc.conteudoTexto || "");
+    setToast("Texto copiado.");
+    setTimeout(() => setToast(null), 3000);
   }
 
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
@@ -1970,6 +2126,16 @@ export default function App() {
         .video-item-row input[type="text"], .video-item-row input:not([type]) { flex: 1.2; min-width: 0; }
         .video-item-row select { flex: 1; min-width: 0; font-size: 12px; padding: 6px 6px; }
         .video-item-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
+        .processos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+        .processo-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+        .processo-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .processo-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+        .processo-card-title { margin: 0; font-size: 14px; font-weight: 600; }
+        .processo-card-text { margin: 0; font-size: 12.5px; color: var(--text-dim); white-space: pre-wrap; max-height: 90px; overflow-y: auto; line-height: 1.5; }
+        .processo-card-buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .processo-card-obs { margin: 0; font-size: 11.5px; color: var(--text-dim); font-style: italic; }
+        .processo-img-preview { width: 100%; max-height: 160px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.03); }
+        .processo-img-loading { font-size: 11.5px; color: var(--text-dim); padding: 20px 0; text-align: center; }
       `}</style>
 
 
@@ -2006,6 +2172,9 @@ export default function App() {
             <span className="rail-label">Entregáveis</span> <span className="rail-tag">em breve</span>
           </button>
           <div className="rail-divider" />
+          <button className={"rail-btn " + (tab === "processos" ? "active" : "")} onClick={() => setTab("processos")}>
+            <Wrench size={16} /> <span className="rail-label">Processos internos</span>
+          </button>
           <button className={"rail-btn " + (tab === "calculadora" ? "active" : "")} onClick={() => setTab("calculadora")}>
             <Calculator size={16} /> <span className="rail-label">Calculadora</span>
           </button>
@@ -2883,6 +3052,121 @@ export default function App() {
                 </button>
               </div>
             </div>
+          ) : tab === "processos" ? (
+            <>
+              <div className="toolbar">
+                {processosCategorias.map((cat) => (
+                  <span
+                    key={cat}
+                    className={"tag-pill tag-pill-btn" + (processoFiltroCategoria === cat ? " selected" : "")}
+                    style={{ "--tag-color": "#4FA8A0" }}
+                  >
+                    <span onClick={() => setProcessoFiltroCategoria(processoFiltroCategoria === cat ? "" : cat)} style={{ cursor: "pointer" }}>
+                      {cat}
+                    </span>
+                    <X
+                      size={11}
+                      style={{ marginLeft: 6, cursor: "pointer", verticalAlign: "-1px" }}
+                      onClick={() => removeProcessoCategoria(cat)}
+                    />
+                  </span>
+                ))}
+                <input
+                  value={novaCategoriaProcessoInput}
+                  onChange={(e) => setNovaCategoriaProcessoInput(e.target.value)}
+                  placeholder="+ nova categoria"
+                  style={{ maxWidth: 160 }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { addProcessoCategoria(novaCategoriaProcessoInput); setNovaCategoriaProcessoInput(""); }
+                  }}
+                />
+                <button
+                  className="btn-ghost"
+                  onClick={() => { addProcessoCategoria(novaCategoriaProcessoInput); setNovaCategoriaProcessoInput(""); }}
+                >
+                  <Plus size={14} />
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() =>
+                    setProcessoForm({
+                      id: "pr_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+                      categoria: processoFiltroCategoria || processosCategorias[0] || "",
+                      titulo: "",
+                      conteudoTexto: "",
+                      arquivoPath: "",
+                      arquivoNome: "",
+                      observacoes: "",
+                    })
+                  }
+                >
+                  <Plus size={15} /> Novo documento
+                </button>
+              </div>
+
+              {(() => {
+                const filtrados = processoFiltroCategoria
+                  ? processosDocumentos.filter((d) => d.categoria === processoFiltroCategoria)
+                  : processosDocumentos;
+                if (filtrados.length === 0) {
+                  return <div className="empty">Nenhum documento cadastrado ainda.</div>;
+                }
+                return (
+                  <div className="processos-grid">
+                    {filtrados.map((doc) => (
+                      <div className="processo-card" key={doc.id}>
+                        <div className="processo-card-head">
+                          {doc.categoria && (
+                            <span className="tag-pill">
+                              <span className="tag-dot" style={{ background: "var(--teal)" }} />
+                              {doc.categoria}
+                            </span>
+                          )}
+                          <div className="processo-card-actions">
+                            <button className="icon-btn" title="Editar" onClick={() => setProcessoForm(doc)}>
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              className="icon-btn"
+                              title="Excluir"
+                              onClick={() => setConfirmDelete({ type: "processo", id: doc.id, label: doc.titulo, doc })}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                        <h4 className="processo-card-title">{doc.titulo || "(sem título)"}</h4>
+                        {doc.conteudoTexto && (
+                          <>
+                            <p className="processo-card-text">{doc.conteudoTexto}</p>
+                            <div className="processo-card-buttons">
+                              <button className="btn-ghost" onClick={() => copiarTextoProcesso(doc)}>
+                                <Copy size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Copiar
+                              </button>
+                              <button className="btn-ghost" onClick={() => baixarTextoProcesso(doc)}>
+                                <Download size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Baixar .txt
+                              </button>
+                            </div>
+                          </>
+                        )}
+                        {doc.arquivoPath && (
+                          <>
+                            {isImagemArquivo(doc.arquivoNome) && <ProcessoImagePreview doc={doc} cache={processoPreviewUrls} />}
+                            <div className="processo-card-buttons">
+                              <span className="mono" style={{ fontSize: 11 }}>{doc.arquivoNome}</span>
+                              <button className="btn-ghost" onClick={() => baixarArquivoProcesso(doc)}>
+                                <Download size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Baixar
+                              </button>
+                            </div>
+                          </>
+                        )}
+                        {doc.observacoes && <p className="processo-card-obs">{doc.observacoes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </>
           ) : tab === "propostas" ? (
             <iframe title="Gerador de Proposta" srcDoc={PROPOSTA_HTML} />
           ) : (
@@ -3331,6 +3615,64 @@ export default function App() {
         </div>
       )}
 
+      {processoForm && (
+        <div className="overlay" onClick={() => { setProcessoForm(null); setProcessoNovoArquivo(null); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {processosDocumentos.some((d) => d.id === processoForm.id) ? "Editar documento" : "Novo documento"}
+              <button className="icon-btn" onClick={() => { setProcessoForm(null); setProcessoNovoArquivo(null); }}><X size={15} /></button>
+            </h3>
+            <div className="field">
+              <label>Título</label>
+              <input
+                type="text"
+                placeholder="Ex: Mensagem de boas-vindas"
+                value={processoForm.titulo}
+                onChange={(e) => setProcessoForm({ ...processoForm, titulo: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Categoria</label>
+              <select value={processoForm.categoria} onChange={(e) => setProcessoForm({ ...processoForm, categoria: e.target.value })}>
+                <option value="">Sem categoria</option>
+                {processosCategorias.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Conteúdo em texto (opcional — para mensagens e termos)</label>
+              <textarea
+                rows={5}
+                placeholder="Ex: Olá! Segue nossa proposta..."
+                value={processoForm.conteudoTexto}
+                onChange={(e) => setProcessoForm({ ...processoForm, conteudoTexto: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Arquivo (opcional — imagem, PDF, etc.)</label>
+              {processoForm.arquivoNome && !processoNovoArquivo && (
+                <div className="lock-note" style={{ marginBottom: 8 }}>
+                  <FileText size={12} />
+                  Arquivo atual: {processoForm.arquivoNome}
+                </div>
+              )}
+              <input
+                type="file"
+                ref={processoFileInputRef}
+                onChange={(e) => setProcessoNovoArquivo(e.target.files?.[0] || null)}
+              />
+            </div>
+            <div className="field">
+              <label>Observações</label>
+              <textarea value={processoForm.observacoes} onChange={(e) => setProcessoForm({ ...processoForm, observacoes: e.target.value })} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => { setProcessoForm(null); setProcessoNovoArquivo(null); }}>Cancelar</button>
+              <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => saveProcessoDocumento(processoForm, processoNovoArquivo)}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmDelete && (
         <div className="overlay" onClick={() => setConfirmDelete(null)}>
           <div className="modal" style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
@@ -3354,6 +3696,7 @@ export default function App() {
                   if (confirmDelete.type === "demand") removeDemand(confirmDelete.id);
                   else if (confirmDelete.type === "transacao") removeTransacao(confirmDelete.id, false);
                   else if (confirmDelete.type === "equipamento") removeEquipamento(confirmDelete.id);
+                  else if (confirmDelete.type === "processo") removeProcessoDocumento(confirmDelete.doc);
                   else removeClient(confirmDelete.id);
                 }}
               >

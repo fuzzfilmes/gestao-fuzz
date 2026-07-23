@@ -427,3 +427,79 @@ export const syncMetasMensais = (prev, next) => syncMetas("metas_mensais", "mes"
 export const syncMetasAnuais = (prev, next) => syncMetas("metas_anuais", "ano", prev, next, (v) => num(v));
 export const syncMetasClientesMensais = (prev, next) =>
   syncMetas("metas_clientes_mensais", "mes", prev, next, (v) => intOrNull(v) ?? 0);
+
+// ---------------- Processos internos ----------------
+
+export async function listProcessosCategorias() {
+  const res = await supabase.from("processos_categorias").select("*").order("ordem", { ascending: true });
+  throwIfError(res);
+  return res.data.map((r) => r.nome);
+}
+export async function seedProcessosCategoriasSeVazio(defaults) {
+  const atuais = await listProcessosCategorias();
+  if (atuais.length) return atuais;
+  throwIfError(
+    await supabase.from("processos_categorias").insert(defaults.map((nome, i) => ({ nome, ordem: i })))
+  );
+  return defaults;
+}
+export async function syncProcessosCategorias(prevList, nextList) {
+  const prevSet = new Set(prevList);
+  const nextSet = new Set(nextList);
+  const toDelete = prevList.filter((nomeItem) => !nextSet.has(nomeItem));
+  const toInsert = nextList
+    .filter((nomeItem) => !prevSet.has(nomeItem))
+    .map((nomeItem) => ({ nome: nomeItem, ordem: nextList.indexOf(nomeItem) }));
+  if (toDelete.length) {
+    throwIfError(await supabase.from("processos_categorias").delete().in("nome", toDelete));
+  }
+  if (toInsert.length) {
+    throwIfError(await supabase.from("processos_categorias").insert(toInsert));
+  }
+}
+
+function processoDocToRow(d) {
+  return {
+    id: d.id,
+    categoria: d.categoria || "",
+    titulo: d.titulo || "",
+    conteudo_texto: d.conteudoTexto || null,
+    arquivo_path: d.arquivoPath || null,
+    arquivo_nome: d.arquivoNome || null,
+    observacoes: d.observacoes || "",
+  };
+}
+function processoDocFromRow(r) {
+  return {
+    id: r.id,
+    categoria: r.categoria,
+    titulo: r.titulo,
+    conteudoTexto: r.conteudo_texto || "",
+    arquivoPath: r.arquivo_path || "",
+    arquivoNome: r.arquivo_nome || "",
+    observacoes: r.observacoes,
+  };
+}
+export async function listProcessosDocumentos() {
+  const res = await supabase.from("processos_documentos").select("*").order("created_at", { ascending: false });
+  throwIfError(res);
+  return res.data.map(processoDocFromRow);
+}
+export async function syncProcessosDocumentos(prevList, nextList) {
+  return syncRows("processos_documentos", prevList, nextList, processoDocToRow);
+}
+
+export async function uploadProcessoArquivo(userId, documentoId, file) {
+  const path = `${userId}/${documentoId}-${file.name}`;
+  const res = await supabase.storage.from("processos-internos").upload(path, file, { upsert: true });
+  throwIfError(res);
+  return { path, nome: file.name };
+}
+export async function downloadProcessoArquivo(path) {
+  const res = await supabase.storage.from("processos-internos").download(path);
+  throwIfError(res);
+  return res.data;
+}
+export async function deleteProcessoArquivo(path) {
+  throwIfError(await supabase.storage.from("processos-internos").remove([path]));
+}
