@@ -107,6 +107,9 @@ function parseValorCell(v) {
     limpo = limpo.replace(/\./g, "").replace(",", ".");
   } else if (limpo.includes(",")) {
     limpo = limpo.replace(",", ".");
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(limpo)) {
+    // só pontos, em grupos de milhar (ex: "2.000") — não é separador decimal
+    limpo = limpo.replace(/\./g, "");
   }
   const n = parseFloat(limpo);
   return Number.isFinite(n) ? n : "";
@@ -129,7 +132,24 @@ function parseDataCell(v) {
   return "";
 }
 
-function parseEquipamentosSheet(rows) {
+// Detecta planilhas onde a linha 1 é uma nota/instrução (não o cabeçalho real) e o
+// cabeçalho verdadeiro (Nome, Categoria...) está nos VALORES da primeira linha de dados.
+// Nesse caso, usa essa linha como cabeçalho e descarta ela do conjunto de dados.
+function corrigirCabecalhoDeslocado(rows) {
+  if (!rows.length) return rows;
+  const primeira = rows[0];
+  const chaves = Object.keys(primeira);
+  const reconhecidos = chaves.filter((k) => EQUIP_HEADER_MAP[normalizeHeader(primeira[k])]).length;
+  if (reconhecidos < 2) return rows;
+  return rows.slice(1).map((row) => {
+    const nova = {};
+    chaves.forEach((k) => { nova[primeira[k]] = row[k]; });
+    return nova;
+  });
+}
+
+function parseEquipamentosSheet(rowsBrutas) {
+  const rows = corrigirCabecalhoDeslocado(rowsBrutas);
   const novos = [];
   let ignoradas = 0;
   rows.forEach((row) => {
@@ -139,7 +159,7 @@ function parseEquipamentosSheet(rows) {
       if (campo) campos[campo] = row[key];
     }
     const nome = String(campos.nome || "").trim();
-    if (!nome) {
+    if (!nome || nome.toUpperCase() === "TOTAL") {
       ignoradas++;
       return;
     }
