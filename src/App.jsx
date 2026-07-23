@@ -845,16 +845,13 @@ export default function App() {
     const exists = transacoes.some((x) => x.id === t.id);
     if (!exists && parcelas && parcelas > 1 && t.data) {
       const grupoId = "grp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
-      const totalCentavos = Math.round((parseFloat(t.valor) || 0) * 100);
-      const baseCentavos = Math.floor(totalCentavos / parcelas);
-      const restoCentavos = totalCentavos - baseCentavos * parcelas;
+      const valorFormatado = (parseFloat(t.valor) || 0).toFixed(2);
       const novas = [];
       for (let i = 0; i < parcelas; i++) {
-        const valorCentavos = baseCentavos + (i === parcelas - 1 ? restoCentavos : 0);
         novas.push({
           ...t,
           id: "t_" + Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 5),
-          valor: (valorCentavos / 100).toFixed(2),
+          valor: valorFormatado,
           data: addMonthsToDate(t.data, i),
           parcelaGrupoId: grupoId,
           parcelaAtual: i + 1,
@@ -1814,6 +1811,13 @@ export default function App() {
         .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
         .btn-ghost { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text); padding: 9px 16px; border-radius: 10px; font-size: 13px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+        .btn-despesa, .btn-receita {
+          border: none; font-weight: 600; padding: 9px 16px; border-radius: 10px; font-size: 13px; cursor: pointer;
+          display: flex; align-items: center; gap: 6px; transition: filter 0.15s, transform 0.15s;
+        }
+        .btn-despesa:hover, .btn-receita:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-despesa { background: var(--red); color: #2a0a07; }
+        .btn-receita { background: var(--green); color: #0d2a0f; }
         .btn-ghost:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.18); }
         .btn-danger { background: var(--red); color: #2a0a07; border: none; padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
         .lock-note { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; display: flex; gap: 5px; align-items: center; }
@@ -2333,10 +2337,10 @@ export default function App() {
                     <option key={c.id} value={c.id}>{c.nome}</option>
                   ))}
                 </select>
-                <button className="btn-ghost" onClick={() => setTransacaoForm({ ...emptyTransacao("Despesa"), data: monthAnchor + "-05" })}>
-                  <Plus size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Nova despesa
+                <button className="btn-despesa" onClick={() => setTransacaoForm({ ...emptyTransacao("Despesa"), data: monthAnchor + "-05" })}>
+                  <Plus size={14} />Nova despesa
                 </button>
-                <button className="btn-primary" onClick={() => setTransacaoForm({ ...emptyTransacao("Receita"), categoria: tiposProducao[0] || "", data: monthAnchor + "-05" })}>
+                <button className="btn-receita" onClick={() => setTransacaoForm({ ...emptyTransacao("Receita"), categoria: tiposProducao[0] || "", data: monthAnchor + "-05" })}>
                   <Plus size={15} /> Nova receita
                 </button>
               </div>
@@ -2985,7 +2989,7 @@ export default function App() {
             </div>
             <div className="grid2">
               <div className="field">
-                <label>Valor (R$){transacaoForm.parcelaGrupoId ? "" : parcelasInput > 1 ? " — total" : ""}</label>
+                <label>Valor (R$){transacaoForm.parcelaGrupoId ? "" : parcelasInput > 1 ? " — mensal" : ""}</label>
                 <input type="number" min="0" step="0.01" value={transacaoForm.valor} onChange={(e) => setTransacaoForm({ ...transacaoForm, valor: e.target.value })} />
               </div>
               <div className="field">
@@ -3050,7 +3054,7 @@ export default function App() {
                 {parcelasInput > 1 && (
                   <div className="lock-note">
                     <Archive size={12} />
-                    Serão criadas {parcelasInput} transações mensais de R$ {((parseFloat(transacaoForm.valor) || 0) / parcelasInput).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} cada, a partir do vencimento acima.
+                    Serão criadas {parcelasInput} transações mensais de R$ {(parseFloat(transacaoForm.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} cada (total R$ {((parseFloat(transacaoForm.valor) || 0) * parcelasInput).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}), a partir do vencimento acima.
                   </div>
                 )}
               </div>
