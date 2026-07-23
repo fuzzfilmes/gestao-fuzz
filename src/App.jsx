@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
+import * as googleCal from "./lib/googleCalendar.js";
 
 let xlsxModulePromise = null;
 function loadXLSX() {
@@ -623,6 +624,260 @@ function ProcessoImagePreview({ doc, cache }) {
   return <img src={url} alt={doc.titulo} className="processo-img-preview" />;
 }
 
+function buildMonthGrid(mesISO) {
+  const firstOfMonth = mesISO + "-01";
+  const firstWeekday = new Date(firstOfMonth + "T00:00:00").getDay();
+  const gridStart = addDaysISO(firstOfMonth, -firstWeekday);
+  const [y, m] = mesISO.split("-").map(Number);
+  const totalDiasMes = new Date(y, m, 0).getDate();
+  const lastOfMonth = mesISO + "-" + String(totalDiasMes).padStart(2, "0");
+  const lastWeekday = new Date(lastOfMonth + "T00:00:00").getDay();
+  const gridEnd = addDaysISO(lastOfMonth, 6 - lastWeekday);
+  const dias = [];
+  let cursor = gridStart;
+  while (cursor <= gridEnd) {
+    dias.push(cursor);
+    cursor = addDaysISO(cursor, 1);
+  }
+  return dias;
+}
+
+function AgendaBoard({ token, calendarId, onTokenExpired }) {
+  const [modo, setModo] = useState("semana");
+  const [weekAnchor, setWeekAnchor] = useState(todayISO());
+  const [monthAnchorAgenda, setMonthAnchorAgenda] = useState(mesRef(todayISO()));
+  const [eventos, setEventos] = useState([]);
+  const [loadingEventos, setLoadingEventos] = useState(false);
+  const [eventoForm, setEventoForm] = useState(null);
+  const [confirmDeleteEvento, setConfirmDeleteEvento] = useState(null);
+  const [erro, setErro] = useState("");
+
+  const sunday = sundayOfWeek(weekAnchor);
+  const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysISO(sunday, i)), [sunday]);
+  const monthDates = useMemo(() => buildMonthGrid(monthAnchorAgenda), [monthAnchorAgenda]);
+  const visibleDates = modo === "semana" ? weekDates : monthDates;
+  const today = todayISO();
+
+  const eventosPorDia = useMemo(() => {
+    const map = new Map();
+    for (const ev of eventos) {
+      const d = (ev.start?.dateTime || ev.start?.date || "").slice(0, 10);
+      if (!map.has(d)) map.set(d, []);
+      map.get(d).push(ev);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => (a.start?.dateTime || "").localeCompare(b.start?.dateTime || ""));
+    return map;
+  }, [eventos]);
+
+  async function carregarEventos(datas) {
+    if (!token || !calendarId || !datas.length) return;
+    setLoadingEventos(true);
+    setErro("");
+    try {
+      const timeMin = new Date(datas[0] + "T00:00:00").toISOString();
+      const timeMax = new Date(addDaysISO(datas[datas.length - 1], 1) + "T00:00:00").toISOString();
+      const items = await googleCal.listEvents(token, calendarId, timeMin, timeMax);
+      setEventos(items);
+    } catch (e) {
+      console.error("Falha ao carregar eventos", e);
+      if (e.status === 401) onTokenExpired();
+      else setErro(e.message || "Falha ao carregar eventos do Google Agenda.");
+    } finally {
+      setLoadingEventos(false);
+    }
+  }
+
+  useEffect(() => {
+    carregarEventos(visibleDates);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, calendarId, modo, sunday, monthAnchorAgenda]);
+
+  async function salvarEvento(form) {
+    try {
+      const body = googleCal.formToGoogleEvent(form);
+      if (form.id) await googleCal.updateEvent(token, calendarId, form.id, body);
+      else await googleCal.createEvent(token, calendarId, body);
+      setEventoForm(null);
+      carregarEventos(visibleDates);
+    } catch (e) {
+      console.error("Falha ao salvar compromisso", e);
+      if (e.status === 401) onTokenExpired();
+      else setErro(e.message || "Falha ao salvar compromisso.");
+    }
+  }
+
+  async function excluirEvento(id) {
+    try {
+      await googleCal.deleteEvent(token, calendarId, id);
+      setConfirmDeleteEvento(null);
+      carregarEventos(visibleDates);
+    } catch (e) {
+      console.error("Falha ao excluir compromisso", e);
+      if (e.status === 401) onTokenExpired();
+      else setErro(e.message || "Falha ao excluir compromisso.");
+    }
+  }
+
+  function novoEventoEm(date) {
+    setEventoForm({ titulo: "", data: date, horaInicio: "09:00", horaFim: "10:00", local: "", descricao: "" });
+  }
+
+  function irParaAnterior() {
+    if (modo === "semana") setWeekAnchor(addDaysISO(sunday, -7));
+    else setMonthAnchorAgenda(addMonthsISO(monthAnchorAgenda, -1));
+  }
+  function irParaProximo() {
+    if (modo === "semana") setWeekAnchor(addDaysISO(sunday, 7));
+    else setMonthAnchorAgenda(addMonthsISO(monthAnchorAgenda, 1));
+  }
+  function irParaHoje() {
+    setWeekAnchor(today);
+    setMonthAnchorAgenda(mesRef(today));
+  }
+
+  return (
+    <div className="kanban">
+      <div className="kanban-header">
+        <button className="icon-btn" onClick={irParaAnterior}><ChevronLeft size={14} /></button>
+        <div className="kanban-range">
+          {modo === "semana" ? fmtDiaMes(weekDates[0]) + " — " + fmtDiaMes(weekDates[6]) : mesLabel(monthAnchorAgenda)}
+        </div>
+        <button className="icon-btn" onClick={irParaProximo}><ChevronRight size={14} /></button>
+        <button className="btn-ghost kanban-today-btn" onClick={irParaHoje}>Hoje</button>
+        <div className="agenda-modo-toggle">
+          <button className={"btn-ghost" + (modo === "semana" ? " active" : "")} onClick={() => setModo("semana")}>Semana</button>
+          <button className={"btn-ghost" + (modo === "mes" ? " active" : "")} onClick={() => setModo("mes")}>Mês</button>
+        </div>
+        {loadingEventos && <span className="lock-note" style={{ marginLeft: 10 }}>Carregando…</span>}
+      </div>
+      {erro && <div className="empty" style={{ color: "var(--red)" }}>{erro}</div>}
+
+      {modo === "semana" ? (
+        <div className="kanban-board">
+          {weekDates.map((date, i) => {
+            const dayEventos = eventosPorDia.get(date) || [];
+            const isToday = date === today;
+            return (
+              <div key={date} className={"kanban-col" + (isToday ? " today" : "")}>
+                <div className="kanban-col-header">
+                  <span className="kanban-col-day">{DAY_LABELS_SHORT[i]}</span>
+                  <span className="kanban-col-date">{fmtDiaMes(date)}</span>
+                </div>
+                <div className="kanban-col-body">
+                  {dayEventos.map((ev) => {
+                    const horaIni = (ev.start?.dateTime || "").slice(11, 16);
+                    return (
+                      <div key={ev.id} className="kanban-card" onClick={() => setEventoForm(googleCal.googleEventToForm(ev))}>
+                        <span className="kanban-card-title">
+                          {horaIni && <span className="mono" style={{ marginRight: 6, fontSize: 11, color: "var(--text-dim)" }}>{horaIni}</span>}
+                          {ev.summary || "(sem título)"}
+                        </span>
+                        <button className="kanban-card-del" onClick={(e) => { e.stopPropagation(); setConfirmDeleteEvento(ev); }}>
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button className="kanban-add-btn" onClick={() => novoEventoEm(date)}>
+                    <Plus size={12} /> adicionar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="agenda-month-grid">
+          {DAY_LABELS_SHORT.map((d) => (
+            <div key={d} className="agenda-month-weekday">{d}</div>
+          ))}
+          {monthDates.map((date) => {
+            const inMonth = date.slice(0, 7) === monthAnchorAgenda;
+            const dayEventos = eventosPorDia.get(date) || [];
+            const isToday = date === today;
+            const visiveis = dayEventos.slice(0, 3);
+            return (
+              <div
+                key={date}
+                className={"agenda-month-day" + (inMonth ? "" : " outside") + (isToday ? " today" : "")}
+                onClick={() => novoEventoEm(date)}
+              >
+                <div className="agenda-month-day-num">{Number(date.slice(8, 10))}</div>
+                {visiveis.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="agenda-month-event-chip"
+                    onClick={(e) => { e.stopPropagation(); setEventoForm(googleCal.googleEventToForm(ev)); }}
+                  >
+                    {ev.summary || "(sem título)"}
+                  </div>
+                ))}
+                {dayEventos.length > 3 && <div className="agenda-month-more">+{dayEventos.length - 3} mais</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {eventoForm && (
+        <div className="overlay" onClick={() => setEventoForm(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {eventoForm.id ? "Editar compromisso" : "Novo compromisso"}
+              <X size={18} style={{ cursor: "pointer" }} onClick={() => setEventoForm(null)} />
+            </h3>
+            <div className="field">
+              <label>Título</label>
+              <input value={eventoForm.titulo} onChange={(e) => setEventoForm({ ...eventoForm, titulo: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Data</label>
+              <input type="date" value={eventoForm.data} onChange={(e) => setEventoForm({ ...eventoForm, data: e.target.value })} />
+            </div>
+            <div className="grid2">
+              <div className="field">
+                <label>Início</label>
+                <input type="time" value={eventoForm.horaInicio} onChange={(e) => setEventoForm({ ...eventoForm, horaInicio: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Fim</label>
+                <input type="time" value={eventoForm.horaFim} onChange={(e) => setEventoForm({ ...eventoForm, horaFim: e.target.value })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Local</label>
+              <input value={eventoForm.local} onChange={(e) => setEventoForm({ ...eventoForm, local: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Descrição</label>
+              <textarea value={eventoForm.descricao} onChange={(e) => setEventoForm({ ...eventoForm, descricao: e.target.value })} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setEventoForm(null)}>Cancelar</button>
+              <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => salvarEvento(eventoForm)}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteEvento && (
+        <div className="overlay" onClick={() => setConfirmDeleteEvento(null)}>
+          <div className="modal" style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
+            <h3>Excluir compromisso <AlertTriangle size={18} color="var(--red)" /></h3>
+            <p style={{ fontSize: 13.5, color: "var(--text-dim)" }}>
+              Tem certeza que quer excluir "{confirmDeleteEvento.summary || "sem título"}"? Essa ação não pode ser desfeita.
+            </p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setConfirmDeleteEvento(null)}>Cancelar</button>
+              <button className="btn-danger" onClick={() => excluirEvento(confirmDeleteEvento.id)}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function KanbanBoard({ tasks, clients, onAdd, onToggle, onDelete, onMove, onUpdate }) {
   const [weekAnchor, setWeekAnchor] = useState(todayISO());
   const [addingDay, setAddingDay] = useState(null);
@@ -848,6 +1103,12 @@ export default function App() {
   const [processoFiltroCategoria, setProcessoFiltroCategoria] = useState("");
   const processoPreviewUrls = useRef(new Map());
   const processoFileInputRef = useRef(null);
+  const [googleToken, setGoogleToken] = useState(null);
+  const [googleCalendarId, setGoogleCalendarId] = useState("");
+  const [googleConectando, setGoogleConectando] = useState(false);
+  const [googleErro, setGoogleErro] = useState("");
+  const [googleEventosHoje, setGoogleEventosHoje] = useState([]);
+  const [googleEventosHojeCarregando, setGoogleEventosHojeCarregando] = useState(false);
 
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -1431,6 +1692,46 @@ export default function App() {
     setToast("Texto copiado.");
     setTimeout(() => setToast(null), 3000);
   }
+
+  async function conectarGoogleAgenda() {
+    setGoogleErro("");
+    setGoogleConectando(true);
+    try {
+      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+      if (!clientId) throw new Error("Integração com Google Agenda não configurada (falta VITE_GOOGLE_CLIENT_ID).");
+      const token = await googleCal.requestGoogleToken(clientId);
+      setGoogleToken(token);
+      setGoogleCalendarId("primary");
+    } catch (e) {
+      console.error("Falha ao conectar Google Agenda", e);
+      setGoogleErro(e.message || "Falha ao conectar com o Google Agenda.");
+    } finally {
+      setGoogleConectando(false);
+    }
+  }
+
+  function reconectarGoogleAgenda() {
+    setGoogleToken(null);
+    conectarGoogleAgenda();
+  }
+
+  useEffect(() => {
+    if (!googleToken || !googleCalendarId) {
+      setGoogleEventosHoje([]);
+      return;
+    }
+    let ativo = true;
+    setGoogleEventosHojeCarregando(true);
+    const hoje = todayISO();
+    const timeMin = new Date(hoje + "T00:00:00").toISOString();
+    const timeMax = new Date(addDaysISO(hoje, 1) + "T00:00:00").toISOString();
+    googleCal
+      .listEvents(googleToken, googleCalendarId, timeMin, timeMax)
+      .then((items) => { if (ativo) setGoogleEventosHoje(items); })
+      .catch((e) => console.error("Falha ao carregar compromissos de hoje", e))
+      .finally(() => { if (ativo) setGoogleEventosHojeCarregando(false); });
+    return () => { ativo = false; };
+  }, [googleToken, googleCalendarId]);
 
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
 
@@ -2156,6 +2457,19 @@ export default function App() {
         .processo-card-obs { margin: 0; font-size: 11.5px; color: var(--text-dim); font-style: italic; }
         .processo-img-preview { width: 100%; max-height: 160px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.03); }
         .processo-img-loading { font-size: 11.5px; color: var(--text-dim); padding: 20px 0; text-align: center; }
+        .agenda-modo-toggle { display: flex; gap: 4px; margin-left: 10px; }
+        .agenda-modo-toggle .btn-ghost { padding: 7px 12px; font-size: 12.5px; }
+        .btn-ghost.active { background: var(--brand); border-color: transparent; color: #fff; }
+        .agenda-month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        .agenda-month-weekday { text-align: center; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; padding-bottom: 4px; }
+        .agenda-month-day { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; min-height: 84px; cursor: pointer; display: flex; flex-direction: column; gap: 3px; transition: border-color 0.15s; }
+        .agenda-month-day:hover { border-color: var(--brand); }
+        .agenda-month-day.outside { opacity: 0.4; }
+        .agenda-month-day.today .agenda-month-day-num { color: var(--brand); font-weight: 700; }
+        .agenda-month-day-num { font-size: 12px; color: var(--text-dim); }
+        .agenda-month-event-chip { font-size: 11px; background: rgba(255,255,255,0.06); border-radius: 4px; padding: 2px 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agenda-month-event-chip:hover { background: var(--brand); color: #fff; }
+        .agenda-month-more { font-size: 10.5px; color: var(--text-dim); padding-left: 5px; }
       `}</style>
 
 
@@ -2180,6 +2494,9 @@ export default function App() {
           </button>
           <button className={"rail-btn " + (tab === "kanban" ? "active" : "")} onClick={() => setTab("kanban")}>
             <LayoutGrid size={16} /> <span className="rail-label">Kanban semanal</span>
+          </button>
+          <button className={"rail-btn " + (tab === "agenda" ? "active" : "")} onClick={() => setTab("agenda")}>
+            <Calendar size={16} /> <span className="rail-label">Agenda</span>
           </button>
           <button className={"rail-btn " + (tab === "financeiro" ? "active" : "")} onClick={() => setTab("financeiro")}>
             <DollarSign size={16} /> <span className="rail-label">Financeiro</span>
@@ -2345,6 +2662,32 @@ export default function App() {
                   </div>
                 </div>
                 <div className="home-right">
+                  <div className="home-card">
+                    <h4><Calendar size={14} /> Compromissos de hoje</h4>
+                    {!googleToken ? (
+                      <div className="home-card-empty">
+                        <button className="btn-ghost" style={{ fontSize: 11.5, padding: "5px 10px" }} onClick={conectarGoogleAgenda} disabled={googleConectando}>
+                          {googleConectando ? "Conectando…" : "Conectar Google Agenda"}
+                        </button>
+                      </div>
+                    ) : googleEventosHojeCarregando ? (
+                      <div className="home-card-empty">Carregando…</div>
+                    ) : googleEventosHoje.length === 0 ? (
+                      <div className="home-card-empty">Nenhum compromisso na agenda hoje.</div>
+                    ) : (
+                      googleEventosHoje.map((ev) => {
+                        const horaIni = (ev.start?.dateTime || "").slice(11, 16);
+                        const horaFim = (ev.end?.dateTime || "").slice(11, 16);
+                        return (
+                          <div key={ev.id} className="home-row" onClick={() => setTab("agenda")}>
+                            <span className="home-row-dot tone-ok" />
+                            <span className="home-row-title">{ev.summary || "(sem título)"}</span>
+                            <span className="home-row-sub">{horaIni ? horaIni + (horaFim ? " - " + horaFim : "") : "dia todo"}</span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                   <div className="home-card">
                     <h4><Film size={14} /> Entregas de hoje</h4>
                     {homeHoje.entregas.length === 0 ? (
@@ -3041,6 +3384,19 @@ export default function App() {
               onMove={moveKanbanTask}
               onUpdate={updateKanbanTask}
             />
+          ) : tab === "agenda" ? (
+            !googleToken ? (
+              <div className="empty" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "40px 20px" }}>
+                <Calendar size={28} style={{ color: "var(--text-dim)" }} />
+                <p style={{ margin: 0 }}>Conecte sua conta do Google para ver e criar compromissos aqui.</p>
+                {googleErro && <p style={{ color: "var(--red)", fontSize: 12.5, maxWidth: 420, textAlign: "center" }}>{googleErro}</p>}
+                <button className="btn-primary" style={{ marginLeft: 0 }} onClick={conectarGoogleAgenda} disabled={googleConectando}>
+                  <Calendar size={15} /> {googleConectando ? "Conectando…" : "Conectar Google Agenda"}
+                </button>
+              </div>
+            ) : (
+              <AgendaBoard token={googleToken} calendarId={googleCalendarId} onTokenExpired={reconectarGoogleAgenda} />
+            )
           ) : tab === "config" ? (
             <div className="config-panel">
               <h3 className="config-section-title">Tipos de produção</h3>
