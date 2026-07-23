@@ -4,6 +4,12 @@ import { PROPOSTA_HTML, CALCULADORA_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
 
+let xlsxModulePromise = null;
+function loadXLSX() {
+  if (!xlsxModulePromise) xlsxModulePromise = import("xlsx");
+  return xlsxModulePromise;
+}
+
 const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy"];
 const STATUS_APROVACAO = ["Não enviado", "Aguardando", "Aprovado", "Alteração solicitada"];
 const DEFAULT_TIPOS = ["Produção Comercial", "Institucional", "Podcast", "Motion", "Outro"];
@@ -51,6 +57,119 @@ const emptyEquipamento = () => ({
   observacoes: "",
   criadoEm: todayISO(),
 });
+
+function normalizeHeader(h) {
+  return String(h || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const EQUIP_HEADER_MAP = {
+  nome: "nome",
+  item: "nome",
+  equipamento: "nome",
+  categoria: "categoria",
+  status: "status",
+  situacao: "status",
+  numserie: "numeroSerie",
+  nserie: "numeroSerie",
+  numerodeserie: "numeroSerie",
+  ndeserie: "numeroSerie",
+  serial: "numeroSerie",
+  numeroserie: "numeroSerie",
+  responsavel: "responsavel",
+  local: "local",
+  localizacao: "local",
+  valor: "valorCompra",
+  valordecompra: "valorCompra",
+  valorcompra: "valorCompra",
+  preco: "valorCompra",
+  data: "dataCompra",
+  datadecompra: "dataCompra",
+  datacompra: "dataCompra",
+  observacoes: "observacoes",
+  observacao: "observacoes",
+  obs: "observacoes",
+};
+
+function parseValorCell(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : "";
+  const s = String(v || "").trim();
+  if (!s) return "";
+  let limpo = s.replace(/[^\d,.\-]/g, "");
+  if (limpo.includes(",") && limpo.includes(".")) {
+    limpo = limpo.replace(/\./g, "").replace(",", ".");
+  } else if (limpo.includes(",")) {
+    limpo = limpo.replace(",", ".");
+  }
+  const n = parseFloat(limpo);
+  return Number.isFinite(n) ? n : "";
+}
+
+function parseDataCell(v) {
+  if (!v) return "";
+  if (v instanceof Date) {
+    return v.getUTCFullYear() + "-" + String(v.getUTCMonth() + 1).padStart(2, "0") + "-" + String(v.getUTCDate()).padStart(2, "0");
+  }
+  const s = String(v).trim();
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = "20" + y;
+    return y + "-" + mo.padStart(2, "0") + "-" + d.padStart(2, "0");
+  }
+  return "";
+}
+
+function parseEquipamentosSheet(rows) {
+  const novos = [];
+  let ignoradas = 0;
+  rows.forEach((row) => {
+    const campos = {};
+    for (const key of Object.keys(row)) {
+      const campo = EQUIP_HEADER_MAP[normalizeHeader(key)];
+      if (campo) campos[campo] = row[key];
+    }
+    const nome = String(campos.nome || "").trim();
+    if (!nome) {
+      ignoradas++;
+      return;
+    }
+    const categoria = CATEGORIAS_EQUIP.includes(campos.categoria) ? campos.categoria : CATEGORIAS_EQUIP[0];
+    const status = STATUS_EQUIP.includes(campos.status) ? campos.status : "Disponível";
+    const valor = parseValorCell(campos.valorCompra);
+    novos.push({
+      ...emptyEquipamento(),
+      id: "eq_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7) + "_" + novos.length,
+      nome,
+      categoria,
+      status,
+      numeroSerie: String(campos.numeroSerie || "").trim(),
+      responsavel: String(campos.responsavel || "").trim(),
+      local: String(campos.local || "").trim(),
+      valorCompra: valor === "" ? "" : String(valor),
+      dataCompra: parseDataCell(campos.dataCompra),
+      observacoes: String(campos.observacoes || "").trim(),
+    });
+  });
+  return { novos, ignoradas };
+}
+
+async function baixarModeloEquipamentos() {
+  const XLSX = await loadXLSX();
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([
+    ["Nome", "Categoria", "Status", "Nº de Série", "Responsável", "Local", "Valor de Compra", "Data de Compra", "Observações"],
+    ["Ex: Câmera Sony A7III", "Câmeras", "Disponível", "SN123456", "Vítor", "Armário 2, prateleira B", "12500.00", "2024-03-15", ""],
+  ]);
+  XLSX.utils.book_append_sheet(wb, ws, "Equipamentos");
+  XLSX.writeFile(wb, "modelo-equipamentos.xlsx");
+}
 
 const emptyTransacao = (tipo = "Receita") => ({
   id: "t_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
@@ -671,6 +790,7 @@ export default function App() {
   const [equipamentoForm, setEquipamentoForm] = useState(null);
   const [equipFiltroCategoria, setEquipFiltroCategoria] = useState("");
   const [equipFiltroStatus, setEquipFiltroStatus] = useState("");
+  const equipFileInputRef = useRef(null);
 
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -1109,6 +1229,31 @@ export default function App() {
   function removeEquipamento(id) {
     persistEquipamentos(equipamentos.filter((e) => e.id !== id));
     setConfirmDelete(null);
+  }
+
+  function importarEquipamentosArquivo(file) {
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const XLSX = await loadXLSX();
+        const wb = XLSX.read(ev.target.result, { type: "array", cellDates: true });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+        const { novos, ignoradas } = parseEquipamentosSheet(rows);
+        if (novos.length > 0) {
+          persistEquipamentos([...novos, ...equipamentos]);
+        }
+        setToast(
+          novos.length + " equipamento(s) importado(s)" + (ignoradas > 0 ? " · " + ignoradas + " linha(s) sem nome ignorada(s)" : "") + "."
+        );
+        setTimeout(() => setToast(null), 6000);
+      } catch (e) {
+        console.error("Falha ao importar planilha de equipamentos", e);
+        setToast("Não consegui ler essa planilha. Confira se o arquivo é .xlsx, .xls ou .csv.");
+        setTimeout(() => setToast(null), 6000);
+      }
+    };
+    reader.readAsArrayBuffer(file);
   }
 
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
@@ -2630,6 +2775,23 @@ export default function App() {
                   <option value="">Todos os status</option>
                   {STATUS_EQUIP.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
+                <button className="btn-ghost" onClick={baixarModeloEquipamentos}>
+                  <FileText size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Baixar modelo
+                </button>
+                <button className="btn-ghost" onClick={() => equipFileInputRef.current?.click()}>
+                  <Archive size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Importar planilha
+                </button>
+                <input
+                  type="file"
+                  ref={equipFileInputRef}
+                  accept=".xlsx,.xls,.csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) importarEquipamentosArquivo(file);
+                    e.target.value = "";
+                  }}
+                />
                 <button className="btn-primary" onClick={() => setEquipamentoForm(emptyEquipamento())}>
                   <Plus size={15} /> Novo equipamento
                 </button>
