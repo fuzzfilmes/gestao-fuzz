@@ -1369,8 +1369,8 @@ export default function App() {
         if (antigo && antigo !== arquivoPath) await api.deleteProcessoArquivo(antigo);
       } catch (e) {
         console.error("Falha ao enviar arquivo", e);
-        setToast("Não consegui enviar o arquivo. Tenta de novo.");
-        setTimeout(() => setToast(null), 6000);
+        setToast("Não consegui enviar o arquivo: " + (e?.message || e?.error_description || JSON.stringify(e)));
+        setTimeout(() => setToast(null), 12000);
         return;
       }
     }
