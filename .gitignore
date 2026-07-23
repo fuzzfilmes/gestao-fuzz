@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.DS_Store
+painel_producao_14.html
+painel_producao.jsx
+
+.claude/
