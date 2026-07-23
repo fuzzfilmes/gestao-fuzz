@@ -1977,10 +1977,10 @@ export default function App() {
                   label: "Resultados financeiros",
                   content: (
                     <div className="stats-row">
-                      <div className="stat ready"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStats.recebido.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">recebido</div></div>
-                      <div className="stat wait"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStats.aReceber.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">a receber</div></div>
-                      <div className="stat warn"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStats.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">despesas</div></div>
-                      <div className="stat"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStats.saldo.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">saldo</div></div>
+                      <div className="stat ready"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.recebido.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">recebido no mês</div></div>
+                      <div className="stat wait"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.aReceber.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">a receber no mês</div></div>
+                      <div className="stat warn"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">despesas no mês</div></div>
+                      <div className="stat"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">saldo no mês</div></div>
                     </div>
                   ),
                 },
@@ -2002,7 +2002,7 @@ export default function App() {
                   <div className="home-quick-stats">
                     <div className="stat warn"><div className="n">{stats.atrasado}</div><div className="l">demandas atrasadas</div></div>
                     <div className="stat wait"><div className="n">{followUps.length}</div><div className="l">propostas p/ follow up</div></div>
-                    <div className="stat ready"><div className="n">{hideValues ? "••••" : "R$ " + financeStats.recebido.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">recebido no mês</div></div>
+                    <div className="stat ready"><div className="n">{hideValues ? "••••" : "R$ " + financeStatsMes.recebido.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">recebido no mês</div></div>
                   </div>
                   <div className="home-quick-actions">
                     <button className="btn-ghost" onClick={() => { setTab("demandas"); setDemandForm(emptyDemand()); }}><Plus size={14} />Nova demanda</button>
