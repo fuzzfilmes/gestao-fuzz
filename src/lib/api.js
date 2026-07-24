@@ -344,6 +344,7 @@ function equipamentoToRow(e) {
     responsavel: e.responsavel || "",
     local: e.local || "",
     valor_compra: numOrNull(e.valorCompra),
+    quantidade: intOrNull(e.quantidade) ?? 1,
     data_compra: n(e.dataCompra),
     observacoes: e.observacoes || "",
     criado_em: n(e.criadoEm),
@@ -359,6 +360,7 @@ function equipamentoFromRow(r) {
     responsavel: r.responsavel,
     local: r.local,
     valorCompra: r.valor_compra != null ? String(r.valor_compra) : "",
+    quantidade: r.quantidade != null ? r.quantidade : 1,
     dataCompra: r.data_compra || "",
     observacoes: r.observacoes,
     criadoEm: r.criado_em,
@@ -401,6 +403,57 @@ export async function syncTiposProducao(prevList, nextList) {
   if (toInsert.length) {
     throwIfError(await supabase.from("tipos_producao").insert(toInsert));
   }
+}
+
+export async function renomearTipoProducaoRow(nomeAntigo, nomeNovo, ordem) {
+  throwIfError(await supabase.from("tipos_producao").delete().eq("nome", nomeAntigo));
+  throwIfError(await supabase.from("tipos_producao").insert({ nome: nomeNovo, ordem }));
+}
+
+// ---------------- Categorias de equipamento ----------------
+
+export async function listCategoriasEquipamento() {
+  const res = await supabase.from("categorias_equipamento").select("*").order("ordem", { ascending: true });
+  throwIfError(res);
+  return res.data.map((r) => r.nome);
+}
+export async function seedCategoriasEquipamentoSeVazio(defaults) {
+  const atuais = await listCategoriasEquipamento();
+  if (atuais.length) return atuais;
+  throwIfError(
+    await supabase.from("categorias_equipamento").insert(defaults.map((nome, i) => ({ nome, ordem: i })))
+  );
+  return defaults;
+}
+export async function syncCategoriasEquipamento(prevList, nextList) {
+  const prevSet = new Set(prevList);
+  const nextSet = new Set(nextList);
+  const toDelete = prevList.filter((nomeItem) => !nextSet.has(nomeItem));
+  const toInsert = nextList
+    .filter((nomeItem) => !prevSet.has(nomeItem))
+    .map((nomeItem) => ({ nome: nomeItem, ordem: nextList.indexOf(nomeItem) }));
+  if (toDelete.length) {
+    throwIfError(await supabase.from("categorias_equipamento").delete().in("nome", toDelete));
+  }
+  if (toInsert.length) {
+    throwIfError(await supabase.from("categorias_equipamento").insert(toInsert));
+  }
+}
+
+// ---------------- Cores de status ----------------
+
+export async function listCoresStatus() {
+  const res = await supabase.from("cores_status").select("*");
+  throwIfError(res);
+  const obj = {};
+  for (const row of res.data) obj[row.chave] = row.cor;
+  return obj;
+}
+export async function syncCoresStatus(prevObj, nextObj) {
+  const changedKeys = Object.keys(nextObj).filter((k) => nextObj[k] !== prevObj[k]);
+  if (!changedKeys.length) return;
+  const rows = changedKeys.map((k) => ({ chave: k, cor: nextObj[k] }));
+  throwIfError(await supabase.from("cores_status").upsert(rows, { onConflict: "user_id,chave" }));
 }
 
 // ---------------- Metas (period-keyed) ----------------

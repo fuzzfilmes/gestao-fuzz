@@ -12,8 +12,25 @@ function loadXLSX() {
   return xlsxModulePromise;
 }
 
-const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy"];
+const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy", "Aguardando"];
 const STATUS_APROVACAO = ["Não enviado", "Aguardando", "Aprovado", "Alteração solicitada"];
+
+const DEFAULT_CORES_STATUS = {
+  "producao:Não iniciada": "#8a8f98",
+  "producao:Em andamento": "#4FA8A0",
+  "producao:Finalizada": "#6FBF73",
+  "producao:StandBy": "#9B87C4",
+  "producao:Aguardando": "#D9A441",
+  "aprovacao:Não enviado": "#8a8f98",
+  "aprovacao:Aguardando": "#D9A441",
+  "aprovacao:Aprovado": "#6FBF73",
+  "aprovacao:Alteração solicitada": "#E2574C",
+};
+
+function corDoStatusComMapa(mapa, tipo, valor) {
+  const chave = tipo + ":" + valor;
+  return (mapa && mapa[chave]) || DEFAULT_CORES_STATUS[chave] || "#8a8f98";
+}
 const DEFAULT_TIPOS = ["Produção Comercial", "Institucional", "Podcast", "Motion", "Outro"];
 const DEFAULT_PROCESSOS_CATEGORIAS = ["Mensagens padrão", "Dados de pagamento", "Termos de uso de imagem", "Captação", "Edição", "Treinamentos"];
 const PROCESSO_ARQUIVO_MAX_BYTES = 25 * 1024 * 1024;
@@ -48,18 +65,19 @@ const emptyTag = (nome, cor) => ({
   cor,
 });
 
-const CATEGORIAS_EQUIP = ["Câmeras", "Lentes", "Áudio", "Iluminação", "Drones", "Acessórios", "Informática", "Outro"];
+const DEFAULT_CATEGORIAS_EQUIP = ["Câmeras", "Lentes", "Áudio", "Iluminação", "Drones", "Acessórios", "Informática", "Outro"];
 const STATUS_EQUIP = ["Disponível", "Em uso", "Em manutenção", "Emprestado", "Danificado"];
 
 const emptyEquipamento = () => ({
   id: "eq_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
   nome: "",
-  categoria: CATEGORIAS_EQUIP[0],
+  categoria: DEFAULT_CATEGORIAS_EQUIP[0],
   status: "Disponível",
   numeroSerie: "",
   responsavel: "",
   local: "",
   valorCompra: "",
+  quantidade: 1,
   dataCompra: "",
   observacoes: "",
   criadoEm: todayISO(),
@@ -94,6 +112,9 @@ const EQUIP_HEADER_MAP = {
   valordecompra: "valorCompra",
   valorcompra: "valorCompra",
   preco: "valorCompra",
+  quantidade: "quantidade",
+  qtd: "quantidade",
+  qtde: "quantidade",
   data: "dataCompra",
   datadecompra: "dataCompra",
   datacompra: "dataCompra",
@@ -152,8 +173,9 @@ function corrigirCabecalhoDeslocado(rows) {
   });
 }
 
-function parseEquipamentosSheet(rowsBrutas) {
+function parseEquipamentosSheet(rowsBrutas, categoriasValidas) {
   const rows = corrigirCabecalhoDeslocado(rowsBrutas);
+  const categorias = categoriasValidas && categoriasValidas.length ? categoriasValidas : ["Outro"];
   const novos = [];
   let ignoradas = 0;
   rows.forEach((row) => {
@@ -167,9 +189,10 @@ function parseEquipamentosSheet(rowsBrutas) {
       ignoradas++;
       return;
     }
-    const categoria = CATEGORIAS_EQUIP.includes(campos.categoria) ? campos.categoria : CATEGORIAS_EQUIP[0];
+    const categoria = categorias.includes(campos.categoria) ? campos.categoria : categorias[0];
     const status = STATUS_EQUIP.includes(campos.status) ? campos.status : "Disponível";
     const valor = parseValorCell(campos.valorCompra);
+    const quantidade = Math.max(1, parseInt(campos.quantidade, 10) || 1);
     novos.push({
       ...emptyEquipamento(),
       id: "eq_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7) + "_" + novos.length,
@@ -180,6 +203,7 @@ function parseEquipamentosSheet(rowsBrutas) {
       responsavel: String(campos.responsavel || "").trim(),
       local: String(campos.local || "").trim(),
       valorCompra: valor === "" ? "" : String(valor),
+      quantidade,
       dataCompra: parseDataCell(campos.dataCompra),
       observacoes: String(campos.observacoes || "").trim(),
     });
@@ -191,8 +215,8 @@ async function baixarModeloEquipamentos() {
   const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([
-    ["Nome", "Categoria", "Status", "Nº de Série", "Responsável", "Local", "Valor de Compra", "Data de Compra", "Observações"],
-    ["Ex: Câmera Sony A7III", "Câmeras", "Disponível", "SN123456", "Vítor", "Armário 2, prateleira B", "12500.00", "2024-03-15", ""],
+    ["Nome", "Categoria", "Status", "Nº de Série", "Responsável", "Local", "Quantidade", "Valor de Compra", "Data de Compra", "Observações"],
+    ["Ex: Câmera Sony A7III", "Câmeras", "Disponível", "SN123456", "Vítor", "Armário 2, prateleira B", "1", "12500.00", "2024-03-15", ""],
   ]);
   XLSX.utils.book_append_sheet(wb, ws, "Equipamentos");
   XLSX.writeFile(wb, "modelo-equipamentos.xlsx");
@@ -1056,6 +1080,8 @@ export default function App() {
   const [proposals, setProposals] = useState([]);
   const [transacoes, setTransacoes] = useState([]);
   const [tiposProducao, setTiposProducao] = useState(DEFAULT_TIPOS);
+  const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
+  const [coresStatus, setCoresStatus] = useState({});
   const [kanbanTasks, setKanbanTasks] = useState([]);
   const [demandForm, setDemandForm] = useState(null);
   const [clientForm, setClientForm] = useState(null);
@@ -1092,6 +1118,12 @@ export default function App() {
     setMetaAnualInputValue(metasAnuais[ano] ? String(metasAnuais[ano]) : "");
   }, [monthAnchor, metasAnuais]);
   const [novoTipoInput, setNovoTipoInput] = useState("");
+  const [configSecaoAtiva, setConfigSecaoAtiva] = useState(null);
+  const [tipoEditando, setTipoEditando] = useState(null);
+  const [tipoEditValue, setTipoEditValue] = useState("");
+  const [novaCategoriaEquipInput, setNovaCategoriaEquipInput] = useState("");
+  const [categoriaEquipEditando, setCategoriaEquipEditando] = useState(null);
+  const [categoriaEquipEditValue, setCategoriaEquipEditValue] = useState("");
   const [hideValues, setHideValues] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1140,6 +1172,13 @@ export default function App() {
         load("propostas", api.listPropostas, setProposals, []),
         load("transações", api.listTransacoes, setTransacoes, []),
         load("tipos de produção", () => api.seedTiposProducaoSeVazio(DEFAULT_TIPOS), setTiposProducao, DEFAULT_TIPOS),
+        load(
+          "categorias de equipamento",
+          () => api.seedCategoriasEquipamentoSeVazio(DEFAULT_CATEGORIAS_EQUIP),
+          setCategoriasEquipamento,
+          DEFAULT_CATEGORIAS_EQUIP
+        ),
+        load("cores de status", api.listCoresStatus, setCoresStatus, {}),
         load("tarefas do kanban", api.listKanbanTasks, setKanbanTasks, []),
         load("metas", api.listMetasMensais, setMetas, {}),
         load("metas anuais", api.listMetasAnuais, setMetasAnuais, {}),
@@ -1506,6 +1545,66 @@ export default function App() {
     persistTipos(tiposProducao.filter((t) => t !== nome));
   }
 
+  function renomearTipoProducao(nomeAntigo, nomeNovo) {
+    const limpo = nomeNovo.trim();
+    if (!limpo || limpo === nomeAntigo || tiposProducao.includes(limpo)) return;
+    persistTipos(tiposProducao.map((t) => (t === nomeAntigo ? limpo : t)));
+    if (demandsRef.current.some((d) => d.tipo === nomeAntigo)) {
+      persistDemands(demandsRef.current.map((d) => (d.tipo === nomeAntigo ? { ...d, tipo: limpo } : d)));
+    }
+    if (proposalsRef.current.some((p) => p.tipo === nomeAntigo)) {
+      persistProposals(proposalsRef.current.map((p) => (p.tipo === nomeAntigo ? { ...p, tipo: limpo } : p)));
+    }
+    if (transacoesRef.current.some((t) => t.tipo === "Receita" && t.categoria === nomeAntigo)) {
+      persistTransacoes(
+        transacoesRef.current.map((t) => (t.tipo === "Receita" && t.categoria === nomeAntigo ? { ...t, categoria: limpo } : t))
+      );
+    }
+  }
+
+  async function persistCategoriasEquipamento(list) {
+    const prev = categoriasEquipamento;
+    setCategoriasEquipamento(list);
+    try {
+      await api.syncCategoriasEquipamento(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar categorias de equipamento", e);
+    }
+  }
+
+  function addCategoriaEquipamento(nome) {
+    const limpo = nome.trim();
+    if (!limpo || categoriasEquipamento.includes(limpo)) return;
+    persistCategoriasEquipamento([...categoriasEquipamento, limpo]);
+  }
+
+  function removeCategoriaEquipamento(nome) {
+    persistCategoriasEquipamento(categoriasEquipamento.filter((c) => c !== nome));
+  }
+
+  function renomearCategoriaEquipamento(nomeAntigo, nomeNovo) {
+    const limpo = nomeNovo.trim();
+    if (!limpo || limpo === nomeAntigo || categoriasEquipamento.includes(limpo)) return;
+    persistCategoriasEquipamento(categoriasEquipamento.map((c) => (c === nomeAntigo ? limpo : c)));
+    if (equipamentos.some((eq) => eq.categoria === nomeAntigo)) {
+      persistEquipamentos(equipamentos.map((eq) => (eq.categoria === nomeAntigo ? { ...eq, categoria: limpo } : eq)));
+    }
+  }
+
+  async function persistCoresStatus(obj) {
+    const prev = coresStatus;
+    setCoresStatus(obj);
+    try {
+      await api.syncCoresStatus(prev, obj);
+    } catch (e) {
+      console.error("Falha ao salvar cores de status", e);
+    }
+  }
+
+  function setCorStatus(chave, cor) {
+    persistCoresStatus({ ...coresStatus, [chave]: cor });
+  }
+
   async function persistKanbanTasks(list) {
     const prev = kanbanTasks;
     setKanbanTasks(list);
@@ -1556,7 +1655,12 @@ export default function App() {
   }
 
   function updateDemandField(demandId, field, value) {
-    const list = demandsRef.current.map((d) => (d.id === demandId ? { ...d, [field]: value } : d));
+    const list = demandsRef.current.map((d) => {
+      if (d.id !== demandId) return d;
+      const atualizado = { ...d, [field]: value };
+      if (field === "statusAprovacao" && value === "Aguardando") atualizado.statusProducao = "Aguardando";
+      return atualizado;
+    });
     persistDemands(list);
   }
 
@@ -1634,7 +1738,7 @@ export default function App() {
         const wb = XLSX.read(ev.target.result, { type: "array", cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
-        const { novos, ignoradas } = parseEquipamentosSheet(rows);
+        const { novos, ignoradas } = parseEquipamentosSheet(rows, categoriasEquipamento);
         if (novos.length > 0) {
           persistEquipamentos([...novos, ...equipamentos]);
         }
@@ -1898,7 +2002,7 @@ export default function App() {
         label: "Ver demandas",
       });
     }
-    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.statusProducao !== "Finalizada");
+    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.statusProducao !== "Finalizada" && d.statusProducao !== "Aguardando");
     if (demandasHoje.length > 0) {
       list.push({
         id: "demandas-hoje",
@@ -2351,6 +2455,24 @@ export default function App() {
         .config-tipo-item { display: flex; align-items: center; justify-content: space-between; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
         .config-add-row { display: flex; gap: 8px; }
         .config-add-row input { flex: 1; }
+        .config-tipo-item input { flex: 1; margin-right: 8px; }
+        .config-tipo-actions { display: flex; gap: 4px; flex-shrink: 0; }
+        .config-cards { display: flex; gap: 14px; flex-wrap: wrap; }
+        .config-card {
+          display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+          width: 220px; padding: 20px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: 12px; cursor: pointer; text-align: left; color: var(--text);
+          transition: border-color 0.15s, transform 0.15s;
+        }
+        .config-card:hover { border-color: var(--brand); transform: translateY(-2px); }
+        .config-card-title { font-size: 14px; font-weight: 600; }
+        .config-card-sub { font-size: 12px; color: var(--text-dim); }
+        .config-back { background: none; border: none; color: var(--text-dim); font-size: 12.5px; display: flex; align-items: center; gap: 4px; cursor: pointer; padding: 0; margin-bottom: 14px; }
+        .config-back:hover { color: var(--text); }
+        .config-cores-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+        .config-cor-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+        .config-cor-item input[type=color] { width: 34px; height: 28px; padding: 2px; border-radius: 6px; cursor: pointer; }
+        .status-color-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 
 
         .news-panel { padding: 4px 28px 14px 28px; }
@@ -2921,12 +3043,14 @@ export default function App() {
                               )}
                             </td>
                             <td>{clientName(d.clienteId)}</td>
-                            <td onClick={(e) => e.stopPropagation()}>
+                            <td onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span className="status-color-dot" style={{ background: corDoStatusComMapa(coresStatus, "producao", d.statusProducao) }} />
                               <select value={d.statusProducao} onChange={(e) => updateDemandField(d.id, "statusProducao", e.target.value)}>
                                 {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
                               </select>
                             </td>
-                            <td onClick={(e) => e.stopPropagation()}>
+                            <td onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span className="status-color-dot" style={{ background: corDoStatusComMapa(coresStatus, "aprovacao", d.statusAprovacao) }} />
                               <select value={d.statusAprovacao} onChange={(e) => updateDemandField(d.id, "statusAprovacao", e.target.value)}>
                                 {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
                               </select>
@@ -3451,7 +3575,7 @@ export default function App() {
               <div className="toolbar">
                 <select value={equipFiltroCategoria} onChange={(e) => setEquipFiltroCategoria(e.target.value)}>
                   <option value="">Todas as categorias</option>
-                  {CATEGORIAS_EQUIP.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {categoriasEquipamento.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <select value={equipFiltroStatus} onChange={(e) => setEquipFiltroStatus(e.target.value)}>
                   <option value="">Todos os status</option>
@@ -3489,6 +3613,8 @@ export default function App() {
                       <th>Status</th>
                       <th>Responsável / Local</th>
                       <th>Nº Série</th>
+                      <th>Qtd.</th>
+                      <th>Valor</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -3512,6 +3638,8 @@ export default function App() {
                         </td>
                         <td>{eq.responsavel || eq.local || "—"}</td>
                         <td className="mono">{eq.numeroSerie || "—"}</td>
+                        <td className="mono">{eq.quantidade || 1}</td>
+                        <td className="mono">R$ {((parseFloat(eq.valorCompra) || 0) * (eq.quantidade || 1)).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                         <td>
                           <div className="row-actions">
                             <button className="icon-btn" onClick={() => setEquipamentoForm(eq)}><Pencil size={13} /></button>
@@ -3521,6 +3649,15 @@ export default function App() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "right", fontWeight: 600 }}>Total do que está em visualização:</td>
+                      <td className="mono" style={{ fontWeight: 700 }}>
+                        R$ {filteredEquipamentos.reduce((s, eq) => s + (parseFloat(eq.valorCompra) || 0) * (eq.quantidade || 1), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
                 </table>
               )}
             </>
@@ -3630,36 +3767,167 @@ export default function App() {
               <AgendaBoard token={googleToken} calendarId={googleCalendarId} onTokenExpired={reconectarGoogleAgenda} />
             )
           ) : tab === "config" ? (
-            <div className="config-panel">
-              <h3 className="config-section-title">Tipos de produção</h3>
-              <p className="config-hint">Esses tipos aparecem no cadastro de Demandas e nas receitas do Financeiro.</p>
-              <div className="config-tipo-list">
-                {tiposProducao.map((t) => (
-                  <div className="config-tipo-item" key={t}>
-                    <span>{t}</span>
-                    <button className="icon-btn" onClick={() => removeTipoProducao(t)}><Trash2 size={13} /></button>
-                  </div>
-                ))}
-                {tiposProducao.length === 0 && <div className="empty">Nenhum tipo cadastrado ainda.</div>}
-              </div>
-              <div className="config-add-row">
-                <input
-                  value={novoTipoInput}
-                  onChange={(e) => setNovoTipoInput(e.target.value)}
-                  placeholder="Novo tipo de produção…"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { addTipoProducao(novoTipoInput); setNovoTipoInput(""); }
-                  }}
-                />
-                <button
-                  className="btn-primary"
-                  style={{ marginLeft: 0 }}
-                  onClick={() => { addTipoProducao(novoTipoInput); setNovoTipoInput(""); }}
-                >
-                  <Plus size={15} /> Adicionar
+            configSecaoAtiva === null ? (
+              <div className="config-cards">
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("tipos")}>
+                  <Film size={20} />
+                  <span className="config-card-title">Tipos de produção</span>
+                  <span className="config-card-sub">{tiposProducao.length} cadastrados</span>
+                </button>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("categoriasEquip")}>
+                  <Camera size={20} />
+                  <span className="config-card-title">Categorias de equipamentos</span>
+                  <span className="config-card-sub">{categoriasEquipamento.length} cadastradas</span>
+                </button>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("cores")}>
+                  <LayoutGrid size={20} />
+                  <span className="config-card-title">Cores de status</span>
+                  <span className="config-card-sub">Produção e Aprovação</span>
                 </button>
               </div>
-            </div>
+            ) : configSecaoAtiva === "tipos" ? (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Tipos de produção</h3>
+                <p className="config-hint">Esses tipos aparecem no cadastro de Demandas e nas receitas do Financeiro. Renomear atualiza automaticamente as demandas, propostas e transações que já usam esse tipo.</p>
+                <div className="config-tipo-list">
+                  {tiposProducao.map((t) => (
+                    <div className="config-tipo-item" key={t}>
+                      {tipoEditando === t ? (
+                        <>
+                          <input
+                            value={tipoEditValue}
+                            autoFocus
+                            onChange={(e) => setTipoEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { renomearTipoProducao(t, tipoEditValue); setTipoEditando(null); }
+                              if (e.key === "Escape") setTipoEditando(null);
+                            }}
+                          />
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { renomearTipoProducao(t, tipoEditValue); setTipoEditando(null); }}><CheckCircle size={13} /></button>
+                            <button className="icon-btn" onClick={() => setTipoEditando(null)}><X size={13} /></button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span>{t}</span>
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { setTipoEditando(t); setTipoEditValue(t); }}><Pencil size={13} /></button>
+                            <button className="icon-btn" onClick={() => removeTipoProducao(t)}><Trash2 size={13} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {tiposProducao.length === 0 && <div className="empty">Nenhum tipo cadastrado ainda.</div>}
+                </div>
+                <div className="config-add-row">
+                  <input
+                    value={novoTipoInput}
+                    onChange={(e) => setNovoTipoInput(e.target.value)}
+                    placeholder="Novo tipo de produção…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { addTipoProducao(novoTipoInput); setNovoTipoInput(""); }
+                    }}
+                  />
+                  <button
+                    className="btn-primary"
+                    style={{ marginLeft: 0 }}
+                    onClick={() => { addTipoProducao(novoTipoInput); setNovoTipoInput(""); }}
+                  >
+                    <Plus size={15} /> Adicionar
+                  </button>
+                </div>
+              </div>
+            ) : configSecaoAtiva === "categoriasEquip" ? (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Categorias de equipamentos</h3>
+                <p className="config-hint">Usadas no cadastro e no filtro da aba Equipamentos. Renomear atualiza os equipamentos já cadastrados nessa categoria.</p>
+                <div className="config-tipo-list">
+                  {categoriasEquipamento.map((c) => (
+                    <div className="config-tipo-item" key={c}>
+                      {categoriaEquipEditando === c ? (
+                        <>
+                          <input
+                            value={categoriaEquipEditValue}
+                            autoFocus
+                            onChange={(e) => setCategoriaEquipEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { renomearCategoriaEquipamento(c, categoriaEquipEditValue); setCategoriaEquipEditando(null); }
+                              if (e.key === "Escape") setCategoriaEquipEditando(null);
+                            }}
+                          />
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { renomearCategoriaEquipamento(c, categoriaEquipEditValue); setCategoriaEquipEditando(null); }}><CheckCircle size={13} /></button>
+                            <button className="icon-btn" onClick={() => setCategoriaEquipEditando(null)}><X size={13} /></button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span>{c}</span>
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { setCategoriaEquipEditando(c); setCategoriaEquipEditValue(c); }}><Pencil size={13} /></button>
+                            <button className="icon-btn" onClick={() => removeCategoriaEquipamento(c)}><Trash2 size={13} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {categoriasEquipamento.length === 0 && <div className="empty">Nenhuma categoria cadastrada ainda.</div>}
+                </div>
+                <div className="config-add-row">
+                  <input
+                    value={novaCategoriaEquipInput}
+                    onChange={(e) => setNovaCategoriaEquipInput(e.target.value)}
+                    placeholder="Nova categoria de equipamento…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { addCategoriaEquipamento(novaCategoriaEquipInput); setNovaCategoriaEquipInput(""); }
+                    }}
+                  />
+                  <button
+                    className="btn-primary"
+                    style={{ marginLeft: 0 }}
+                    onClick={() => { addCategoriaEquipamento(novaCategoriaEquipInput); setNovaCategoriaEquipInput(""); }}
+                  >
+                    <Plus size={15} /> Adicionar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Cores de status</h3>
+                <p className="config-hint">Define a cor da bolinha ao lado do status de Produção e Aprovação, na lista de Demandas.</p>
+                <p className="config-hint" style={{ marginTop: 16, fontWeight: 600, color: "var(--text)" }}>Produção</p>
+                <div className="config-cores-list">
+                  {STATUS_PRODUCAO.map((s) => (
+                    <div className="config-cor-item" key={"producao:" + s}>
+                      <input
+                        type="color"
+                        value={corDoStatusComMapa(coresStatus, "producao", s)}
+                        onChange={(e) => setCorStatus("producao:" + s, e.target.value)}
+                      />
+                      <span>{s}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="config-hint" style={{ marginTop: 20, fontWeight: 600, color: "var(--text)" }}>Aprovação</p>
+                <div className="config-cores-list">
+                  {STATUS_APROVACAO.map((s) => (
+                    <div className="config-cor-item" key={"aprovacao:" + s}>
+                      <input
+                        type="color"
+                        value={corDoStatusComMapa(coresStatus, "aprovacao", s)}
+                        onChange={(e) => setCorStatus("aprovacao:" + s, e.target.value)}
+                      />
+                      <span>{s}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
           ) : tab === "processos" ? (
             <>
               <div className="toolbar">
@@ -3876,7 +4144,17 @@ export default function App() {
               </div>
               <div className="field">
                 <label>Status aprovação</label>
-                <select value={demandForm.statusAprovacao} onChange={(e) => setDemandForm({ ...demandForm, statusAprovacao: e.target.value })}>
+                <select
+                  value={demandForm.statusAprovacao}
+                  onChange={(e) => {
+                    const novoValor = e.target.value;
+                    setDemandForm({
+                      ...demandForm,
+                      statusAprovacao: novoValor,
+                      statusProducao: novoValor === "Aguardando" ? "Aguardando" : demandForm.statusProducao,
+                    });
+                  }}
+                >
                   {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
@@ -4179,7 +4457,7 @@ export default function App() {
               <div className="field">
                 <label>Categoria</label>
                 <select value={equipamentoForm.categoria} onChange={(e) => setEquipamentoForm({ ...equipamentoForm, categoria: e.target.value })}>
-                  {CATEGORIAS_EQUIP.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {categoriasEquipamento.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div className="field">
@@ -4205,13 +4483,25 @@ export default function App() {
                 <input type="text" value={equipamentoForm.numeroSerie} onChange={(e) => setEquipamentoForm({ ...equipamentoForm, numeroSerie: e.target.value })} />
               </div>
               <div className="field">
-                <label>Valor de compra (R$)</label>
-                <input type="number" step="0.01" value={equipamentoForm.valorCompra} onChange={(e) => setEquipamentoForm({ ...equipamentoForm, valorCompra: e.target.value })} />
+                <label>Quantidade</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={equipamentoForm.quantidade}
+                  onChange={(e) => setEquipamentoForm({ ...equipamentoForm, quantidade: Math.max(1, parseInt(e.target.value) || 1) })}
+                />
               </div>
             </div>
-            <div className="field">
-              <label>Data de compra</label>
-              <input type="date" value={equipamentoForm.dataCompra} onChange={(e) => setEquipamentoForm({ ...equipamentoForm, dataCompra: e.target.value })} />
+            <div className="grid2">
+              <div className="field">
+                <label>Valor de compra (R$) — por unidade</label>
+                <input type="number" step="0.01" value={equipamentoForm.valorCompra} onChange={(e) => setEquipamentoForm({ ...equipamentoForm, valorCompra: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Data de compra</label>
+                <input type="date" value={equipamentoForm.dataCompra} onChange={(e) => setEquipamentoForm({ ...equipamentoForm, dataCompra: e.target.value })} />
+              </div>
             </div>
             <div className="field">
               <label>Observações</label>
