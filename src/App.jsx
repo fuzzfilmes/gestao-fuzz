@@ -12,7 +12,7 @@ function loadXLSX() {
   return xlsxModulePromise;
 }
 
-const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy", "Aguardando"];
+const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy"];
 const STATUS_APROVACAO = ["Não enviado", "Aguardando", "Aprovado", "Alteração solicitada"];
 
 const DEFAULT_CORES_STATUS = {
@@ -20,7 +20,6 @@ const DEFAULT_CORES_STATUS = {
   "producao:Em andamento": "#4FA8A0",
   "producao:Finalizada": "#6FBF73",
   "producao:StandBy": "#9B87C4",
-  "producao:Aguardando": "#D9A441",
   "aprovacao:Não enviado": "#8a8f98",
   "aprovacao:Aguardando": "#D9A441",
   "aprovacao:Aprovado": "#6FBF73",
@@ -1655,12 +1654,7 @@ export default function App() {
   }
 
   function updateDemandField(demandId, field, value) {
-    const list = demandsRef.current.map((d) => {
-      if (d.id !== demandId) return d;
-      const atualizado = { ...d, [field]: value };
-      if (field === "statusAprovacao" && value === "Aguardando") atualizado.statusProducao = "Aguardando";
-      return atualizado;
-    });
+    const list = demandsRef.current.map((d) => (d.id === demandId ? { ...d, [field]: value } : d));
     persistDemands(list);
   }
 
@@ -2002,7 +1996,7 @@ export default function App() {
         label: "Ver demandas",
       });
     }
-    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.statusProducao !== "Finalizada" && d.statusProducao !== "Aguardando");
+    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.statusProducao !== "Finalizada");
     if (demandasHoje.length > 0) {
       list.push({
         id: "demandas-hoje",
@@ -4144,17 +4138,7 @@ export default function App() {
               </div>
               <div className="field">
                 <label>Status aprovação</label>
-                <select
-                  value={demandForm.statusAprovacao}
-                  onChange={(e) => {
-                    const novoValor = e.target.value;
-                    setDemandForm({
-                      ...demandForm,
-                      statusAprovacao: novoValor,
-                      statusProducao: novoValor === "Aguardando" ? "Aguardando" : demandForm.statusProducao,
-                    });
-                  }}
-                >
+                <select value={demandForm.statusAprovacao} onChange={(e) => setDemandForm({ ...demandForm, statusAprovacao: e.target.value })}>
                   {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
