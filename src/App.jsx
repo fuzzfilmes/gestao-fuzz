@@ -4,6 +4,7 @@ import { PROPOSTA_HTML, CALCULADORA_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
 import * as googleCal from "./lib/googleCalendar.js";
+import fuzzLogo from "./assets/fuzz-logo.png";
 
 let xlsxModulePromise = null;
 function loadXLSX() {
@@ -2122,8 +2123,7 @@ export default function App() {
         .shell { position: relative; z-index: 1; display: flex; min-height: 600px; }
         .right-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .brand-block { padding: 22px 18px 18px 18px; border-bottom: 1px solid rgba(255,255,255,0.07); margin-bottom: 10px; }
-        .brand-logo { font-family: 'Bebas Neue', sans-serif; font-size: 22px; line-height: 1.05; letter-spacing: 1.5px; color: var(--text); }
-        .brand-logo span { display: block; background: linear-gradient(120deg, var(--brand), #ffb199); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .brand-logo-img { height: 42px; width: auto; display: block; filter: brightness(0) invert(1); }
         .topbar {
           display: flex; align-items: flex-start; justify-content: space-between;
           padding: 22px 28px 14px 28px;
@@ -2566,7 +2566,7 @@ export default function App() {
       <div className="shell">
         <div className="rail">
           <div className="brand-block">
-            <div className="brand-logo"><span>FUZZ</span>MÍDIA</div>
+            <img src={fuzzLogo} alt="fuzz" className="brand-logo-img" />
           </div>
           <button className={"rail-btn " + (tab === "inicio" ? "active" : "")} onClick={() => setTab("inicio")}>
             <Home size={16} /> <span className="rail-label">Início</span>
