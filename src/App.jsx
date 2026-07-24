@@ -1061,6 +1061,7 @@ export default function App() {
   const [filterCliente, setFilterCliente] = useState("");
   const [clientView, setClientView] = useState("lista");
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
+  const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
   const [financeFilter, setFinanceFilter] = useState("todos");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
   const [monthAnchor, setMonthAnchor] = useState(mesRef(todayISO()));
@@ -1523,6 +1524,11 @@ export default function App() {
     persistDemands(list);
   }
 
+  function updateDemandField(demandId, field, value) {
+    const list = demandsRef.current.map((d) => (d.id === demandId ? { ...d, [field]: value } : d));
+    persistDemands(list);
+  }
+
   async function persistDemands(list) {
     const prev = demandsRef.current;
     setDemands(list);
@@ -1770,11 +1776,12 @@ export default function App() {
 
   const filteredDemands = useMemo(() => {
     return demands.filter((d) => {
+      if (!mostrarFinalizadas && d.statusProducao === "Finalizada") return false;
       if (filterCliente && d.clienteId !== filterCliente) return false;
       if (search && !d.projeto.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [demands, filterCliente, search]);
+  }, [demands, filterCliente, search, mostrarFinalizadas]);
 
   const stats = useMemo(() => {
     const atrasado = demands.filter((d) => getUrgencia(d).tone === "late").length;
@@ -2445,6 +2452,8 @@ export default function App() {
         .icon-btn:hover { color: var(--text); border-color: var(--brand); background: rgba(155,107,242,0.12); }
         .expand-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
         .expand-btn:hover { color: var(--brand); }
+        tr.clickable-row { cursor: pointer; }
+        tr.clickable-row:hover td { background: var(--surface-alt); }
         .video-subrow td { background: var(--surface-alt); padding: 10px 10px 10px 46px; border-bottom: 1px solid var(--border); }
         .video-sublist { display: flex; flex-direction: column; gap: 6px; }
         .video-subrow-item { display: flex; align-items: center; gap: 10px; }
@@ -2785,6 +2794,10 @@ export default function App() {
                   <Plus size={15} /> Nova demanda
                 </button>
               </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", margin: "-6px 0 12px" }}>
+                <input type="checkbox" checked={mostrarFinalizadas} onChange={(e) => setMostrarFinalizadas(e.target.checked)} />
+                Mostrar demandas finalizadas
+              </label>
 
               {filteredDemands.length === 0 ? (
                 <div className="empty">Nenhuma demanda cadastrada ainda. Crie a primeira.</div>
@@ -2811,13 +2824,12 @@ export default function App() {
                       const expanded = expandedDemands.has(d.id);
                       return (
                         <React.Fragment key={d.id}>
-                          <tr>
+                          <tr
+                            className={prog ? "clickable-row" : ""}
+                            onClick={() => prog && toggleExpandDemand(d.id)}
+                          >
                             <td>
-                              {prog && (
-                                <button className="expand-btn" onClick={() => toggleExpandDemand(d.id)} title="Ver vídeos">
-                                  {expanded ? "▾" : "▸"}
-                                </button>
-                              )}
+                              {prog && <span className="expand-btn" title="Ver vídeos">{expanded ? "▾" : "▸"}</span>}
                             </td>
                             <td className="proj">
                               {d.projeto || "(sem nome)"}
@@ -2828,8 +2840,16 @@ export default function App() {
                               )}
                             </td>
                             <td>{clientName(d.clienteId)}</td>
-                            <td>{d.statusProducao}</td>
-                            <td>{d.statusAprovacao}</td>
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <select value={d.statusProducao} onChange={(e) => updateDemandField(d.id, "statusProducao", e.target.value)}>
+                                {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                              </select>
+                            </td>
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <select value={d.statusAprovacao} onChange={(e) => updateDemandField(d.id, "statusAprovacao", e.target.value)}>
+                                {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                              </select>
+                            </td>
                             <td><span className={"badge " + TONE_CLASS[urg.tone]}>{urg.label}</span></td>
                             <td className="mono">{fmtDate(d.dataEntrega)}</td>
                             <td>
@@ -2837,7 +2857,7 @@ export default function App() {
                                 {ret.ready ? "Liberado" : ret.label === "Aguardando aprovação" ? "Bloqueado" : ret.label}
                               </span>
                             </td>
-                            <td>
+                            <td onClick={(e) => e.stopPropagation()}>
                               <div className="row-actions">
                                 <button className="icon-btn" onClick={() => setDemandForm(d)}><Pencil size={13} /></button>
                                 <button className="icon-btn" onClick={() => setConfirmDelete({ type: "demand", id: d.id, label: d.projeto })}><Trash2 size={13} /></button>
