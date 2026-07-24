@@ -1600,6 +1600,11 @@ export default function App() {
         transacoesRef.current.map((t) => (t.tipo === "Receita" && t.categoria === nomeAntigo ? { ...t, categoria: limpo } : t))
       );
     }
+    const chaveAntiga = "tipo:" + nomeAntigo;
+    if (coresStatus[chaveAntiga]) {
+      const { [chaveAntiga]: cor, ...resto } = coresStatus;
+      persistCoresStatus({ ...resto, ["tipo:" + limpo]: cor });
+    }
   }
 
   async function persistCategoriasEquipamento(list) {
@@ -3268,7 +3273,12 @@ export default function App() {
                         <tr key={p.id}>
                           <td className="mono">{p.numero || "—"}</td>
                           <td className="proj">{p.clienteNome}</td>
-                          <td>{p.tipo}</td>
+                          <td>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: corDoStatusComMapa(coresStatus, "tipo", p.tipo), flexShrink: 0 }} />
+                              {p.tipo}
+                            </span>
+                          </td>
                           <td className="mono">{fmtDate(p.dataGeracao)}{alerta && <span className="badge badge-late" style={{ marginLeft: 8 }}>follow up</span>}</td>
                           <td className="mono">R$ {Number(p.valorTotal || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                           <td>
@@ -3787,7 +3797,12 @@ export default function App() {
                         <tbody>
                           {relatorioPorTipo.map((r) => (
                             <tr key={r.tipo}>
-                              <td className="proj">{r.tipo}</td>
+                              <td className="proj">
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: corDoStatusComMapa(coresStatus, "tipo", r.tipo), flexShrink: 0 }} />
+                                  {r.tipo}
+                                </span>
+                              </td>
                               <td className="mono">{r.count}</td>
                               <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                             </tr>
@@ -3809,7 +3824,12 @@ export default function App() {
                         <tr key={d.id}>
                           <td className="proj">{d.projeto || "(sem nome)"}</td>
                           <td>{clientName(d.clienteId)}</td>
-                          <td>{d.tipo}</td>
+                          <td>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: corDoStatusComMapa(coresStatus, "tipo", d.tipo), flexShrink: 0 }} />
+                              {d.tipo}
+                            </span>
+                          </td>
                           <td className="mono">{fmtDate(d.dataEntrega)}</td>
                           <td className="mono">R$ {(relatorioValorPorDemanda.get(d.id) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                           <td>
@@ -3968,7 +3988,7 @@ export default function App() {
               <div className="config-panel">
                 <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
                 <h3 className="config-section-title">Cores de status</h3>
-                <p className="config-hint">Define a cor da bolinha ao lado do status de Produção e Aprovação, na lista de Demandas.</p>
+                <p className="config-hint">Define a cor da bolinha ao lado do status de Produção e Aprovação, na lista de Demandas, e do tipo de produção nas Propostas e Relatórios.</p>
                 <p className="config-hint" style={{ marginTop: 16, fontWeight: 600, color: "var(--text)" }}>Produção</p>
                 <div className="config-cores-list">
                   {STATUS_PRODUCAO.map((s) => (
@@ -3994,6 +4014,20 @@ export default function App() {
                       <span>{s}</span>
                     </div>
                   ))}
+                </div>
+                <p className="config-hint" style={{ marginTop: 20, fontWeight: 600, color: "var(--text)" }}>Tipo de produção</p>
+                <div className="config-cores-list">
+                  {tiposProducao.map((t) => (
+                    <div className="config-cor-item" key={"tipo:" + t}>
+                      <input
+                        type="color"
+                        value={corDoStatusComMapa(coresStatus, "tipo", t)}
+                        onChange={(e) => setCorStatus("tipo:" + t, e.target.value)}
+                      />
+                      <span>{t}</span>
+                    </div>
+                  ))}
+                  {tiposProducao.length === 0 && <div className="empty">Nenhum tipo cadastrado ainda.</div>}
                 </div>
               </div>
             )
@@ -4199,7 +4233,11 @@ export default function App() {
               </div>
               <div className="field">
                 <label>Tipo</label>
-                <select value={demandForm.tipo} onChange={(e) => setDemandForm({ ...demandForm, tipo: e.target.value })}>
+                <select
+                  value={demandForm.tipo}
+                  onChange={(e) => setDemandForm({ ...demandForm, tipo: e.target.value })}
+                  style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "tipo", demandForm.tipo) }}
+                >
                   {tiposProducao.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
