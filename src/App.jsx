@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar } from "lucide-react";
-import { PROPOSTA_HTML, CALCULADORA_HTML } from "./embeddedTools.js";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature } from "lucide-react";
+import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
 import * as googleCal from "./lib/googleCalendar.js";
@@ -31,6 +31,7 @@ const TAB_LABELS = {
   processos: "Processos internos",
   calculadora: "Calculadora",
   propostas: "Gerador de Propostas",
+  contratos: "Gerador de Contratos",
   config: "Configurações",
 };
 const RETENCAO_DIAS = 30;
@@ -1113,6 +1114,7 @@ export default function App() {
   const [googleErro, setGoogleErro] = useState("");
   const [googleEventosHoje, setGoogleEventosHoje] = useState([]);
   const [googleEventosHojeCarregando, setGoogleEventosHojeCarregando] = useState(false);
+  const contratoImportPendenteRef = useRef(null);
 
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -1179,6 +1181,23 @@ export default function App() {
               payload: {
                 proximoNumero: computeProximoNumeroProposta(),
                 clientes: clientsRef.current,
+              },
+            },
+            "*"
+          );
+        }
+        return;
+      }
+      if (ev.data.type === "fuzz:contrato-pronto") {
+        if (ev.source) {
+          const importar = contratoImportPendenteRef.current;
+          contratoImportPendenteRef.current = null;
+          ev.source.postMessage(
+            {
+              type: "fuzz:init-contrato",
+              payload: {
+                clientes: clientsRef.current,
+                importar,
               },
             },
             "*"
@@ -1305,6 +1324,15 @@ export default function App() {
   function removeProposal(id) {
     persistProposals(proposalsRef.current.filter((p) => p.id !== id));
     setConfirmDelete(null);
+  }
+
+  function importarPropostaParaContrato(p) {
+    contratoImportPendenteRef.current = {
+      tipo: p.tipo,
+      valor: p.valorTotal,
+      clienteId: p.clienteId,
+    };
+    setTab("contratos");
   }
 
   async function persistTransacoes(list) {
@@ -2610,6 +2638,9 @@ export default function App() {
           <button className={"rail-btn " + (tab === "propostas" ? "active" : "")} onClick={() => setTab("propostas")}>
             <FileText size={16} /> <span className="rail-label">Gerador de Propostas</span>
           </button>
+          <button className={"rail-btn " + (tab === "contratos" ? "active" : "")} onClick={() => setTab("contratos")}>
+            <FileSignature size={16} /> <span className="rail-label">Gerador de Contratos</span>
+          </button>
           <button className={"rail-btn " + (tab === "equipamentos" ? "active" : "")} onClick={() => setTab("equipamentos")}>
             <Camera size={16} /> <span className="rail-label">Equipamentos</span>
           </button>
@@ -2733,7 +2764,7 @@ export default function App() {
             <div className="slate-stripe" />
           </div>
 
-          <div className={"main" + (tab === "propostas" || tab === "calculadora" ? " tool-frame-wrap" : "")}>
+          <div className={"main" + (tab === "propostas" || tab === "calculadora" || tab === "contratos" ? " tool-frame-wrap" : "")}>
             {loading ? (
             <div className="empty">Carregando…</div>
           ) : tab === "inicio" ? (
@@ -3060,6 +3091,13 @@ export default function App() {
                                   <button className="icon-btn" title="Recusar proposta" onClick={() => recusarProposta(p)}><X size={13} /></button>
                                 </>
                               )}
+                              <button
+                                className="icon-btn"
+                                title="Importar para contrato"
+                                onClick={() => importarPropostaParaContrato(p)}
+                              >
+                                <FileSignature size={13} />
+                              </button>
                               <button
                                 className="icon-btn"
                                 title="Excluir proposta"
@@ -3739,6 +3777,8 @@ export default function App() {
             </>
           ) : tab === "propostas" ? (
             <iframe title="Gerador de Proposta" srcDoc={PROPOSTA_HTML} />
+          ) : tab === "contratos" ? (
+            <iframe title="Gerador de Contrato" srcDoc={CONTRATO_HTML} />
           ) : (
             <iframe title="Calculadora de Orçamento" srcDoc={CALCULADORA_HTML} />
           )}
