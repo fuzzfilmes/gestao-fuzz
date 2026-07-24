@@ -25,6 +25,7 @@ const TAB_LABELS = {
   kanban: "Kanban semanal",
   financeiro: "Financeiro",
   metas: "Metas",
+  relatorios: "Relatórios",
   equipamentos: "Equipamentos",
   processos: "Processos internos",
   calculadora: "Calculadora",
@@ -1062,6 +1063,7 @@ export default function App() {
   const [clientView, setClientView] = useState("lista");
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
   const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
+  const [relatorioAno, setRelatorioAno] = useState(() => todayISO().slice(0, 4));
   const [financeFilter, setFinanceFilter] = useState("todos");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
   const [monthAnchor, setMonthAnchor] = useState(mesRef(todayISO()));
@@ -1782,6 +1784,51 @@ export default function App() {
       return true;
     });
   }, [demands, filterCliente, search, mostrarFinalizadas]);
+
+  const relatorioDemandasFinalizadas = useMemo(() => {
+    return demands.filter((d) => d.statusProducao === "Finalizada" && (d.dataEntrega || "").slice(0, 4) === relatorioAno);
+  }, [demands, relatorioAno]);
+
+  const relatorioValorPorDemanda = useMemo(() => {
+    const map = new Map();
+    for (const d of relatorioDemandasFinalizadas) {
+      const valor = transacoes
+        .filter((t) => t.demandaId === d.id && t.tipo === "Receita")
+        .reduce((s, t) => s + (parseFloat(t.valor) || 0), 0);
+      map.set(d.id, valor);
+    }
+    return map;
+  }, [relatorioDemandasFinalizadas, transacoes]);
+
+  const relatorioPorCliente = useMemo(() => {
+    const map = new Map();
+    for (const d of relatorioDemandasFinalizadas) {
+      const key = d.clienteId || "—";
+      if (!map.has(key)) map.set(key, { nome: clientName(d.clienteId), count: 0, valor: 0 });
+      const item = map.get(key);
+      item.count += 1;
+      item.valor += relatorioValorPorDemanda.get(d.id) || 0;
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [relatorioDemandasFinalizadas, relatorioValorPorDemanda, clients]);
+
+  const relatorioPorTipo = useMemo(() => {
+    const map = new Map();
+    for (const d of relatorioDemandasFinalizadas) {
+      const key = d.tipo || "—";
+      if (!map.has(key)) map.set(key, { tipo: key, count: 0, valor: 0 });
+      const item = map.get(key);
+      item.count += 1;
+      item.valor += relatorioValorPorDemanda.get(d.id) || 0;
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [relatorioDemandasFinalizadas, relatorioValorPorDemanda]);
+
+  const relatorioTotais = useMemo(() => {
+    let valor = 0;
+    relatorioValorPorDemanda.forEach((v) => { valor += v; });
+    return { total: relatorioDemandasFinalizadas.length, valor };
+  }, [relatorioDemandasFinalizadas, relatorioValorPorDemanda]);
 
   const stats = useMemo(() => {
     const atrasado = demands.filter((d) => getUrgencia(d).tone === "late").length;
@@ -2546,6 +2593,9 @@ export default function App() {
           </button>
           <button className={"rail-btn " + (tab === "metas" ? "active" : "")} onClick={() => setTab("metas")}>
             <Target size={16} /> <span className="rail-label">Metas</span>
+          </button>
+          <button className={"rail-btn " + (tab === "relatorios" ? "active" : "")} onClick={() => setTab("relatorios")}>
+            <TrendingUp size={16} /> <span className="rail-label">Relatórios</span>
           </button>
           <button className="rail-btn disabled" disabled>
             <span className="rail-label">Entregáveis</span> <span className="rail-tag">em breve</span>
@@ -3446,6 +3496,88 @@ export default function App() {
               onMove={moveKanbanTask}
               onUpdate={updateKanbanTask}
             />
+          ) : tab === "relatorios" ? (
+            <>
+              <div className="month-nav">
+                <button className="icon-btn" onClick={() => setRelatorioAno(String(Number(relatorioAno) - 1))}><ChevronLeft size={14} /></button>
+                <div className="month-nav-label">{relatorioAno}</div>
+                <button className="icon-btn" onClick={() => setRelatorioAno(String(Number(relatorioAno) + 1))}><ChevronRight size={14} /></button>
+                <button className="btn-ghost kanban-today-btn" onClick={() => setRelatorioAno(todayISO().slice(0, 4))}>Ano atual</button>
+              </div>
+
+              <div className="finance-cards" style={{ marginBottom: 20 }}>
+                <div className="stat ready">
+                  <div className="stat-icon-sq teal"><CheckCircle2 size={16} /></div>
+                  <div className="n">{relatorioTotais.total}</div><div className="l">entregas finalizadas em {relatorioAno}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-icon-sq teal"><Wallet size={16} /></div>
+                  <div className="n">R$ {relatorioTotais.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">faturado (vinculado às entregas)</div>
+                </div>
+              </div>
+
+              {relatorioDemandasFinalizadas.length === 0 ? (
+                <div className="empty">Nenhuma demanda finalizada em {relatorioAno} ainda.</div>
+              ) : (
+                <>
+                  <div className="grid2" style={{ gap: 24, alignItems: "start" }}>
+                    <div>
+                      <h3 className="config-section-title">Por cliente</h3>
+                      <table>
+                        <thead><tr><th>Cliente</th><th>Entregas</th><th>Faturado</th></tr></thead>
+                        <tbody>
+                          {relatorioPorCliente.map((r) => (
+                            <tr key={r.nome}>
+                              <td className="proj">{r.nome}</td>
+                              <td className="mono">{r.count}</td>
+                              <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div>
+                      <h3 className="config-section-title">Por tipo de produção</h3>
+                      <table>
+                        <thead><tr><th>Tipo</th><th>Entregas</th><th>Faturado</th></tr></thead>
+                        <tbody>
+                          {relatorioPorTipo.map((r) => (
+                            <tr key={r.tipo}>
+                              <td className="proj">{r.tipo}</td>
+                              <td className="mono">{r.count}</td>
+                              <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <h3 className="config-section-title" style={{ marginTop: 28 }}>Demandas finalizadas em {relatorioAno}</h3>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Projeto</th><th>Cliente</th><th>Tipo</th><th>Entrega</th><th>Faturado</th><th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {relatorioDemandasFinalizadas.map((d) => (
+                        <tr key={d.id}>
+                          <td className="proj">{d.projeto || "(sem nome)"}</td>
+                          <td>{clientName(d.clienteId)}</td>
+                          <td>{d.tipo}</td>
+                          <td className="mono">{fmtDate(d.dataEntrega)}</td>
+                          <td className="mono">R$ {(relatorioValorPorDemanda.get(d.id) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                          <td>
+                            <button className="icon-btn" onClick={() => setDemandForm(d)}><Pencil size={13} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </>
           ) : tab === "agenda" ? (
             !googleToken ? (
               <div className="empty" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "40px 20px" }}>
