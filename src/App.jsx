@@ -1089,6 +1089,7 @@ export default function App() {
   const [filterCliente, setFilterCliente] = useState("");
   const [clientView, setClientView] = useState("lista");
   const [clientViewInfo, setClientViewInfo] = useState(null);
+  const [clientArquivos, setClientArquivos] = useState([]);
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
   const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
   const [relatorioAno, setRelatorioAno] = useState(() => todayISO().slice(0, 4));
@@ -1107,6 +1108,23 @@ export default function App() {
   const [metaInputValue, setMetaInputValue] = useState("");
   const [metaAnualInputValue, setMetaAnualInputValue] = useState("");
   const [metaClientesInputValue, setMetaClientesInputValue] = useState("");
+
+  useEffect(() => {
+    if (!clientViewInfo) {
+      setClientArquivos([]);
+      return;
+    }
+    let cancelado = false;
+    api
+      .listArquivosCliente(clientViewInfo.id)
+      .then((lista) => {
+        if (!cancelado) setClientArquivos(lista);
+      })
+      .catch((e) => console.error("Falha ao carregar arquivos do cliente", e));
+    return () => {
+      cancelado = true;
+    };
+  }, [clientViewInfo]);
 
   useEffect(() => {
     setMetaInputValue(metas[monthAnchor] ? String(metas[monthAnchor]) : "");
@@ -1154,10 +1172,12 @@ export default function App() {
   const demandsRef = useRef(demands);
   const proposalsRef = useRef(proposals);
   const transacoesRef = useRef(transacoes);
+  const clientViewInfoRef = useRef(clientViewInfo);
   clientsRef.current = clients;
   demandsRef.current = demands;
   proposalsRef.current = proposals;
   transacoesRef.current = transacoes;
+  clientViewInfoRef.current = clientViewInfo;
 
   useEffect(() => {
     (async () => {
@@ -1242,6 +1262,26 @@ export default function App() {
             "*"
           );
         }
+        return;
+      }
+      if (ev.data.type === "fuzz:anexar-cliente") {
+        const payload = ev.data.payload || {};
+        (async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            await api.uploadArquivoCliente(user.id, payload.clienteId, payload.tipo, payload.blob, payload.nome);
+            if (clientViewInfoRef.current && clientViewInfoRef.current.id === payload.clienteId) {
+              const lista = await api.listArquivosCliente(payload.clienteId);
+              setClientArquivos(lista);
+            }
+            setToast("Cópia do " + (payload.tipo === "contrato" ? "contrato" : "proposta") + " salva no cadastro do cliente.");
+            setTimeout(() => setToast(null), 6000);
+          } catch (e) {
+            console.error("Falha ao anexar arquivo ao cliente", e);
+            setToast("Não consegui salvar a cópia no cliente: " + (e?.message || e?.error_description || JSON.stringify(e)));
+            setTimeout(() => setToast(null), 12000);
+          }
+        })();
         return;
       }
       if (ev.data.type !== "fuzz:proposta-concluida") return;
@@ -1840,6 +1880,35 @@ export default function App() {
     } catch (e) {
       console.error("Falha ao baixar arquivo", e);
       setToast("Não consegui baixar esse arquivo.");
+      setTimeout(() => setToast(null), 6000);
+    }
+  }
+
+  async function baixarArquivoCliente(a) {
+    try {
+      const blob = await api.downloadArquivoCliente(a.arquivoPath);
+      const url = URL.createObjectURL(blob);
+      const el = document.createElement("a");
+      el.href = url;
+      el.download = a.nome || "arquivo.pdf";
+      document.body.appendChild(el);
+      el.click();
+      el.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Falha ao baixar arquivo do cliente", e);
+      setToast("Não consegui baixar esse arquivo.");
+      setTimeout(() => setToast(null), 6000);
+    }
+  }
+
+  async function removerArquivoCliente(a) {
+    try {
+      await api.deleteArquivoCliente(a.id, a.arquivoPath);
+      setClientArquivos((lista) => lista.filter((x) => x.id !== a.id));
+    } catch (e) {
+      console.error("Falha ao remover arquivo do cliente", e);
+      setToast("Não consegui remover esse arquivo.");
       setTimeout(() => setToast(null), 6000);
     }
   }
@@ -4209,6 +4278,22 @@ export default function App() {
               </div>
             )}
             {clientViewInfo.observacoes && <div className="field"><label>Observações</label><div>{clientViewInfo.observacoes}</div></div>}
+            {clientArquivos.length > 0 && (
+              <div className="field">
+                <label>Arquivos anexados</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {clientArquivos.map((a) => (
+                    <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span>{a.tipo === "contrato" ? "📄" : "📎"} {a.nome}</span>
+                      <span style={{ display: "flex", gap: 4 }}>
+                        <button className="icon-btn" title="Baixar" onClick={() => baixarArquivoCliente(a)}><Download size={15} /></button>
+                        <button className="icon-btn" title="Remover" onClick={() => removerArquivoCliente(a)}><Trash2 size={15} /></button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => setClientViewInfo(null)}>Fechar</button>
               {clientViewInfo.driveLink && (

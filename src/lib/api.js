@@ -556,3 +556,50 @@ export async function downloadProcessoArquivo(path) {
 export async function deleteProcessoArquivo(path) {
   throwIfError(await supabase.storage.from("processos-internos").remove([path]));
 }
+
+// ---------------- Arquivos do cliente (cópias de Proposta/Contrato) ----------------
+
+function arquivoClienteFromRow(r) {
+  return {
+    id: r.id,
+    clienteId: r.cliente_id,
+    tipo: r.tipo,
+    nome: r.nome,
+    arquivoPath: r.arquivo_path,
+    criadoEm: r.created_at,
+  };
+}
+
+export async function listArquivosCliente(clienteId) {
+  const res = await supabase
+    .from("arquivos_cliente")
+    .select("*")
+    .eq("cliente_id", clienteId)
+    .order("created_at", { ascending: false });
+  throwIfError(res);
+  return res.data.map(arquivoClienteFromRow);
+}
+
+export async function uploadArquivoCliente(userId, clienteId, tipo, blob, nome) {
+  const id = "af_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  const path = `${userId}/${clienteId}-${id}-${nome}`;
+  throwIfError(await supabase.storage.from("arquivos-cliente").upload(path, blob, { upsert: true, contentType: "application/pdf" }));
+  const res = await supabase
+    .from("arquivos_cliente")
+    .insert({ id, cliente_id: clienteId, tipo, nome, arquivo_path: path })
+    .select()
+    .single();
+  throwIfError(res);
+  return arquivoClienteFromRow(res.data);
+}
+
+export async function downloadArquivoCliente(path) {
+  const res = await supabase.storage.from("arquivos-cliente").download(path);
+  throwIfError(res);
+  return res.data;
+}
+
+export async function deleteArquivoCliente(id, path) {
+  await supabase.storage.from("arquivos-cliente").remove([path]);
+  throwIfError(await supabase.from("arquivos_cliente").delete().eq("id", id));
+}
