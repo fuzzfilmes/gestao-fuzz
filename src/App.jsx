@@ -1153,8 +1153,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    function computeProximoNumeroProposta() {
+      let maior = 0;
+      for (const p of proposalsRef.current) {
+        const m = String(p.numero || "").match(/^(\d+)/);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maior) maior = n;
+        }
+      }
+      return String(maior + 1).padStart(3, "0");
+    }
+
     function onMessage(ev) {
-      if (!ev.data || ev.data.type !== "fuzz:proposta-concluida") return;
+      if (!ev.data || !ev.data.type) return;
+      if (ev.data.type === "fuzz:proposta-pronta") {
+        if (ev.source) {
+          ev.source.postMessage(
+            {
+              type: "fuzz:init-proposta",
+              payload: {
+                proximoNumero: computeProximoNumeroProposta(),
+                clientes: clientsRef.current,
+              },
+            },
+            "*"
+          );
+        }
+        return;
+      }
+      if (ev.data.type !== "fuzz:proposta-concluida") return;
       const p = ev.data.payload;
       const nomeCliente = (p.cliente.nome || "").trim();
       if (!nomeCliente) return;
@@ -2925,6 +2953,7 @@ export default function App() {
                 <table>
                   <thead>
                     <tr>
+                      <th>Número</th>
                       <th>Cliente</th>
                       <th>Tipo</th>
                       <th>Data de geração</th>
@@ -2938,6 +2967,7 @@ export default function App() {
                       const alerta = precisaFollowUp(p);
                       return (
                         <tr key={p.id}>
+                          <td className="mono">{p.numero || "—"}</td>
                           <td className="proj">{p.clienteNome}</td>
                           <td>{p.tipo}</td>
                           <td className="mono">{fmtDate(p.dataGeracao)}{alerta && <span className="badge badge-late" style={{ marginLeft: 8 }}>follow up</span>}</td>
