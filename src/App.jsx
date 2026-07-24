@@ -1088,6 +1088,7 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filterCliente, setFilterCliente] = useState("");
   const [clientView, setClientView] = useState("lista");
+  const [clientViewInfo, setClientViewInfo] = useState(null);
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
   const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
   const [relatorioAno, setRelatorioAno] = useState(() => todayISO().slice(0, 4));
@@ -2466,7 +2467,6 @@ export default function App() {
         .config-cores-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
         .config-cor-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
         .config-cor-item input[type=color] { width: 34px; height: 28px; padding: 2px; border-radius: 6px; cursor: pointer; }
-        .status-color-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 
 
         .news-panel { padding: 4px 28px 14px 28px; }
@@ -3037,15 +3037,21 @@ export default function App() {
                               )}
                             </td>
                             <td>{clientName(d.clienteId)}</td>
-                            <td onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <span className="status-color-dot" style={{ background: corDoStatusComMapa(coresStatus, "producao", d.statusProducao) }} />
-                              <select value={d.statusProducao} onChange={(e) => updateDemandField(d.id, "statusProducao", e.target.value)}>
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <select
+                                value={d.statusProducao}
+                                onChange={(e) => updateDemandField(d.id, "statusProducao", e.target.value)}
+                                style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "producao", d.statusProducao) }}
+                              >
                                 {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
                               </select>
                             </td>
-                            <td onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <span className="status-color-dot" style={{ background: corDoStatusComMapa(coresStatus, "aprovacao", d.statusAprovacao) }} />
-                              <select value={d.statusAprovacao} onChange={(e) => updateDemandField(d.id, "statusAprovacao", e.target.value)}>
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <select
+                                value={d.statusAprovacao}
+                                onChange={(e) => updateDemandField(d.id, "statusAprovacao", e.target.value)}
+                                style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "aprovacao", d.statusAprovacao) }}
+                              >
                                 {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
                               </select>
                             </td>
@@ -3115,7 +3121,7 @@ export default function App() {
               ) : clientView === "grade" ? (
                 <div className="client-grid">
                   {clients.map((c) => (
-                    <div className="client-card" key={c.id} onClick={() => setClientForm(c)}>
+                    <div className="client-card" key={c.id} onClick={() => setClientViewInfo(c)}>
                       <div
                         className="client-card-cover"
                         style={c.capaUrl ? { backgroundImage: `url(${c.capaUrl})` } : {}}
@@ -4178,6 +4184,38 @@ export default function App() {
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => setDemandForm(null)}>Cancelar</button>
               <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => saveDemand(demandForm)}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clientViewInfo && (
+        <div className="overlay" onClick={() => setClientViewInfo(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {clientViewInfo.nome || "(sem nome)"}
+              <button className="icon-btn" onClick={() => setClientViewInfo(null)}><X size={15} /></button>
+            </h3>
+            <div className="field"><label>Tipo</label><div>{clientViewInfo.tipo || "—"}</div></div>
+            {clientViewInfo.razaoSocial && <div className="field"><label>Razão social</label><div>{clientViewInfo.razaoSocial}</div></div>}
+            {clientViewInfo.cnpj && <div className="field"><label>CNPJ</label><div>{clientViewInfo.cnpj}</div></div>}
+            {clientViewInfo.contatoNome && <div className="field"><label>Contato</label><div>{clientViewInfo.contatoNome}</div></div>}
+            {clientViewInfo.email && <div className="field"><label>E-mail</label><div>{clientViewInfo.email}</div></div>}
+            {clientViewInfo.telefone && <div className="field"><label>Telefone</label><div>{clientViewInfo.telefone}</div></div>}
+            {(clientViewInfo.endereco || clientViewInfo.bairro || clientViewInfo.municipio) && (
+              <div className="field">
+                <label>Endereço</label>
+                <div>{[clientViewInfo.endereco, clientViewInfo.bairro, [clientViewInfo.municipio, clientViewInfo.estado].filter(Boolean).join("/"), clientViewInfo.cep].filter(Boolean).join(", ")}</div>
+              </div>
+            )}
+            {clientViewInfo.observacoes && <div className="field"><label>Observações</label><div>{clientViewInfo.observacoes}</div></div>}
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setClientViewInfo(null)}>Fechar</button>
+              {clientViewInfo.driveLink && (
+                <a className="btn-primary" style={{ marginLeft: 0 }} href={clientViewInfo.driveLink} target="_blank" rel="noreferrer">
+                  <ExternalLink size={15} /> Abrir Drive do cliente
+                </a>
+              )}
             </div>
           </div>
         </div>
