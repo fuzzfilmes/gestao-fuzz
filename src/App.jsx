@@ -1298,6 +1298,11 @@ export default function App() {
     persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Recusada" } : p)));
   }
 
+  function removeProposal(id) {
+    persistProposals(proposalsRef.current.filter((p) => p.id !== id));
+    setConfirmDelete(null);
+  }
+
   async function persistTransacoes(list) {
     const prev = transacoesRef.current;
     setTransacoes(list);
@@ -2978,14 +2983,21 @@ export default function App() {
                             </span>
                           </td>
                           <td>
-                            {p.status === "Pendente" ? (
-                              <div className="row-actions">
-                                <button className="icon-btn" title="Confirmar proposta" onClick={() => confirmarProposta(p)}><CheckCircle2 size={13} /></button>
-                                <button className="icon-btn" title="Recusar proposta" onClick={() => recusarProposta(p)}><X size={13} /></button>
-                              </div>
-                            ) : (
-                              <span className="mono" style={{ fontSize: 11 }}>—</span>
-                            )}
+                            <div className="row-actions">
+                              {p.status === "Pendente" && (
+                                <>
+                                  <button className="icon-btn" title="Confirmar proposta" onClick={() => confirmarProposta(p)}><CheckCircle2 size={13} /></button>
+                                  <button className="icon-btn" title="Recusar proposta" onClick={() => recusarProposta(p)}><X size={13} /></button>
+                                </>
+                              )}
+                              <button
+                                className="icon-btn"
+                                title="Excluir proposta"
+                                onClick={() => setConfirmDelete({ type: "proposta", id: p.id, label: p.clienteNome + " — " + (p.numero || "sem número") })}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -4103,6 +4115,7 @@ export default function App() {
                   else if (confirmDelete.type === "transacao") removeTransacao(confirmDelete.id, false);
                   else if (confirmDelete.type === "equipamento") removeEquipamento(confirmDelete.id);
                   else if (confirmDelete.type === "processo") removeProcessoDocumento(confirmDelete.doc);
+                  else if (confirmDelete.type === "proposta") removeProposal(confirmDelete.id);
                   else removeClient(confirmDelete.id);
                 }}
               >
