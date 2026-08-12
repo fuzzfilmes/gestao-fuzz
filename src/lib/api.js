@@ -110,6 +110,7 @@ function demandaToRow(d) {
     data_aprovacao: n(d.dataAprovacao),
     link: d.link || "",
     observacoes: d.observacoes || "",
+    ordem: Number.isFinite(d.ordem) ? d.ordem : 0,
   };
 }
 function itemToRow(demandaId, it, ordem) {
@@ -136,6 +137,7 @@ function demandaFromRow(r, itensByDemanda) {
     dataAprovacao: r.data_aprovacao || "",
     link: r.link,
     observacoes: r.observacoes,
+    ordem: r.ordem || 0,
     itens: (itensByDemanda.get(r.id) || []).map((it) => ({
       id: it.id,
       nome: it.nome,
@@ -156,7 +158,9 @@ export async function listDemandas() {
     if (!itensByDemanda.has(it.demanda_id)) itensByDemanda.set(it.demanda_id, []);
     itensByDemanda.get(it.demanda_id).push(it);
   }
-  return demandasRes.data.map((r) => demandaFromRow(r, itensByDemanda));
+  return demandasRes.data
+    .map((r) => demandaFromRow(r, itensByDemanda))
+    .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 }
 export async function syncDemandas(prevList, nextList) {
   await syncRows("demandas", prevList, nextList, demandaToRow);
@@ -555,6 +559,15 @@ export async function downloadProcessoArquivo(path) {
 }
 export async function deleteProcessoArquivo(path) {
   throwIfError(await supabase.storage.from("processos-internos").remove([path]));
+}
+
+export async function uploadCapaCliente(userId, clienteId, file) {
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${userId}/${clienteId}-cover-${Date.now()}.${ext}`;
+  const res = await supabase.storage.from("capas-cliente").upload(path, file, { upsert: true, contentType: file.type });
+  throwIfError(res);
+  const { data } = supabase.storage.from("capas-cliente").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 // ---------------- Arquivos do cliente (cópias de Proposta/Contrato) ----------------

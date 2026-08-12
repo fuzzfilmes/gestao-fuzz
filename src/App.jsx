@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -272,6 +272,7 @@ const emptyDemand = () => ({
   link: "",
   observacoes: "",
   itens: [],
+  ordem: 0,
 });
 
 const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", statusEnvio: "Não enviado", statusAprovacao: "Aguardando" });
@@ -454,6 +455,28 @@ function fmtDiaMes(iso) {
   return d.getDate() + " " + MONTH_LABELS_SHORT[d.getMonth()];
 }
 
+function FilterMenu({ id, openId, setOpenId, activeCount = 0, align = "left", children }) {
+  const open = openId === id;
+  return (
+    <div className="filter-menu">
+      <button
+        type="button"
+        className={"filter-menu-btn" + (activeCount > 0 ? " has-active" : "")}
+        onClick={(e) => { e.stopPropagation(); setOpenId(open ? null : id); }}
+        title="Filtros"
+      >
+        <Filter size={14} />
+        {activeCount > 0 && <span className="filter-menu-badge">{activeCount}</span>}
+      </button>
+      {open && (
+        <div className={"filter-menu-popover" + (align === "right" ? " align-right" : "")} onClick={(e) => e.stopPropagation()}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TagPicker({ allTags, selectedIds, onToggle, onCreate, onClose }) {
   const [search, setSearch] = useState("");
   const [pickingColor, setPickingColor] = useState(false);
@@ -543,13 +566,14 @@ function GoalGauge({ pct, size = 128, label, sublabel }) {
 
 function FinanceChart({ data }) {
   const width = 680;
-  const height = 280;
-  const padding = { top: 16, right: 16, bottom: 30, left: 54 };
+  const height = 320;
+  const padding = { top: 24, right: 16, bottom: 34, left: 60 };
   const chartW = width - padding.left - padding.right;
   const chartH = height - padding.top - padding.bottom;
   const n = Math.max(data.length, 1);
   const groupW = chartW / n;
-  const barW = Math.min(26, groupW * 0.26);
+  const barGap = 4;
+  const barW = Math.min(30, (groupW - barGap * 4) / 3);
 
   const allVals = data.flatMap((d) => [d.totalReceita, d.totalDespesas, d.meta || 0, d.margem]);
   const maxVal = Math.max(1, ...allVals);
@@ -566,13 +590,6 @@ function FinanceChart({ data }) {
   const ticks = 4;
   const tickVals = Array.from({ length: ticks + 1 }, (_, i) => minVal + (range * i) / ticks);
 
-  const margemPts = data.map((d, i) => [padding.left + groupW * i + groupW / 2, scaleY(d.margem)]);
-  const margemPath = margemPts.map((p, i) => (i === 0 ? "M" : "L") + p[0] + "," + p[1]).join(" ");
-
-  const temMeta = data.some((d) => d.meta > 0);
-  const metaPts = data.map((d, i) => [padding.left + groupW * i + groupW / 2, scaleY(d.meta || 0)]);
-  const metaPath = metaPts.map((p, i) => (i === 0 ? "M" : "L") + p[0] + "," + p[1]).join(" ");
-
   return (
     <svg viewBox={"0 0 " + width + " " + height} className="finance-chart-svg" preserveAspectRatio="xMidYMid meet">
       {tickVals.map((v, i) => (
@@ -586,41 +603,62 @@ function FinanceChart({ data }) {
       {data.map((d, i) => {
         const gx = padding.left + groupW * i;
         const cx = gx + groupW / 2;
+        const x1 = cx - barW * 1.5 - barGap;
+        const x2 = cx - barW / 2;
+        const x3 = cx + barW / 2 + barGap;
+        const margemPositiva = d.margem >= 0;
         return (
           <g key={d.mes}>
+            {d.meta > 0 && (
+              <line
+                x1={x1 - 2} x2={x3 + barW + 2} y1={scaleY(d.meta)} y2={scaleY(d.meta)}
+                className="chart-tick-meta"
+              >
+                <title>{"Meta " + mesLabel(d.mes) + ": R$ " + d.meta.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
+              </line>
+            )}
             <rect
-              x={cx - barW - 2}
-              y={Math.min(scaleY(d.totalReceita), zeroY)}
-              width={barW}
-              height={Math.abs(zeroY - scaleY(d.totalReceita))}
-              className="chart-bar-receita"
-              rx="2"
+              x={x1} y={Math.min(scaleY(d.totalReceita), zeroY)} width={barW}
+              height={Math.max(1, Math.abs(zeroY - scaleY(d.totalReceita)))}
+              className="chart-bar-receita" rx="2"
             >
               <title>{"Receita " + mesLabel(d.mes) + ": R$ " + d.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
             </rect>
             <rect
-              x={cx + 2}
-              y={Math.min(scaleY(d.totalDespesas), zeroY)}
-              width={barW}
-              height={Math.abs(zeroY - scaleY(d.totalDespesas))}
-              className="chart-bar-despesa"
-              rx="2"
+              x={x2} y={Math.min(scaleY(d.totalDespesas), zeroY)} width={barW}
+              height={Math.max(1, Math.abs(zeroY - scaleY(d.totalDespesas)))}
+              className="chart-bar-despesa" rx="2"
             >
               <title>{"Despesas " + mesLabel(d.mes) + ": R$ " + d.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
             </rect>
-            <text x={cx} y={height - padding.bottom + 18} textAnchor="middle" className="chart-axis-label">{mesLabel(d.mes)}</text>
+            <rect
+              x={x3} y={Math.min(scaleY(d.margem), zeroY)} width={barW}
+              height={Math.max(1, Math.abs(zeroY - scaleY(d.margem)))}
+              className={"chart-bar-margem" + (margemPositiva ? "" : " negativa")} rx="2"
+            >
+              <title>{"Margem " + mesLabel(d.mes) + ": R$ " + d.margem.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
+            </rect>
+            <text x={cx} y={height - padding.bottom + 20} textAnchor="middle" className="chart-axis-label">{mesLabel(d.mes)}</text>
           </g>
         );
       })}
-
-      {temMeta && <path d={metaPath} className="chart-line-meta" fill="none" />}
-      <path d={margemPath} className="chart-line-margem" fill="none" />
-      {margemPts.map((p, i) => (
-        <circle key={i} cx={p[0]} cy={p[1]} r="3" className="chart-dot-margem">
-          <title>{"Margem " + mesLabel(data[i].mes) + ": R$ " + data[i].margem.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
-        </circle>
-      ))}
     </svg>
+  );
+}
+
+function ReportSection({ title, subtitle, defaultOpen, children }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="report-section">
+      <button className="report-section-head" onClick={() => setOpen(!open)}>
+        <span className="report-section-titles">
+          <span className="report-section-title">{title}</span>
+          {subtitle && <span className="report-section-subtitle">{subtitle}</span>}
+        </span>
+        <ChevronRight size={16} className={"report-section-chevron" + (open ? " open" : "")} />
+      </button>
+      {open && <div className="report-section-body">{children}</div>}
+    </div>
   );
 }
 
@@ -1084,15 +1122,28 @@ export default function App() {
   const [kanbanTasks, setKanbanTasks] = useState([]);
   const [demandForm, setDemandForm] = useState(null);
   const [clientForm, setClientForm] = useState(null);
+  const [capaUploading, setCapaUploading] = useState(false);
   const [transacaoForm, setTransacaoForm] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filterCliente, setFilterCliente] = useState("");
+  const [demandTipoFilter, setDemandTipoFilter] = useState("");
+  const [demandStatusProducaoFilter, setDemandStatusProducaoFilter] = useState("");
+  const [demandStatusAprovacaoFilter, setDemandStatusAprovacaoFilter] = useState("");
+  const [demandDataInicio, setDemandDataInicio] = useState("");
+  const [demandDataFim, setDemandDataFim] = useState("");
+  const [draggedDemandId, setDraggedDemandId] = useState(null);
+  const [proposalClienteFilter, setProposalClienteFilter] = useState("");
+  const [proposalStatusFilter, setProposalStatusFilter] = useState("");
+  const [proposalValorSort, setProposalValorSort] = useState(null);
   const [clientView, setClientView] = useState("lista");
   const [clientViewInfo, setClientViewInfo] = useState(null);
   const [clientArquivos, setClientArquivos] = useState([]);
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
   const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
-  const [relatorioAno, setRelatorioAno] = useState(() => todayISO().slice(0, 4));
+  const [relatorioMes, setRelatorioMes] = useState(() => mesRef(todayISO()));
+  const [relatorioEntregasAberto, setRelatorioEntregasAberto] = useState(false);
+  const [relatorioDemandaClienteFiltro, setRelatorioDemandaClienteFiltro] = useState("");
+  const [relatorioDemandaTipoFiltro, setRelatorioDemandaTipoFiltro] = useState("");
   const [financeFilter, setFinanceFilter] = useState("todos");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
   const [monthAnchor, setMonthAnchor] = useState(mesRef(todayISO()));
@@ -1102,6 +1153,7 @@ export default function App() {
   const [metasClientesNovos, setMetasClientesNovos] = useState({});
   const [tags, setTags] = useState([]);
   const [tagPopoverFor, setTagPopoverFor] = useState(null);
+  const [openFilterMenu, setOpenFilterMenu] = useState(null);
   const [tagFilterIds, setTagFilterIds] = useState([]);
   const [tagSearch, setTagSearch] = useState("");
   const [categoriaSearch, setCategoriaSearch] = useState("");
@@ -1143,6 +1195,7 @@ export default function App() {
   const [categoriaEquipEditando, setCategoriaEquipEditando] = useState(null);
   const [categoriaEquipEditValue, setCategoriaEquipEditValue] = useState("");
   const [hideValues, setHideValues] = useState(false);
+  const [dismissedNotifications, setDismissedNotifications] = useState(() => new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [equipamentos, setEquipamentos] = useState([]);
@@ -1560,6 +1613,15 @@ export default function App() {
     return () => document.removeEventListener("click", onDocClick);
   }, [tagPopoverFor]);
 
+  useEffect(() => {
+    if (!openFilterMenu) return;
+    function onDocClick() {
+      setOpenFilterMenu(null);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [openFilterMenu]);
+
   function toggleStatusPagamento(t) {
     persistTransacoes(transacoes.map((x) => (x.id === t.id ? { ...x, statusPagamento: x.statusPagamento === "Pago" ? "Pendente" : "Pago" } : x)));
   }
@@ -1700,7 +1762,12 @@ export default function App() {
   }
 
   function updateDemandField(demandId, field, value) {
-    const list = demandsRef.current.map((d) => (d.id === demandId ? { ...d, [field]: value } : d));
+    const list = demandsRef.current.map((d) => {
+      if (d.id !== demandId) return d;
+      const atualizado = { ...d, [field]: value };
+      if (field === "statusAprovacao" && value === "Aprovado") atualizado.statusProducao = "Finalizada";
+      return atualizado;
+    });
     persistDemands(list);
   }
 
@@ -1724,11 +1791,43 @@ export default function App() {
     }
   }
 
+  async function handleCapaClienteUpload(file) {
+    if (!file) return;
+    setCapaUploading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const url = await api.uploadCapaCliente(user.id, clientForm.id, file);
+      setClientForm((f) => (f ? { ...f, capaUrl: url } : f));
+    } catch (e) {
+      console.error("Falha ao enviar imagem de capa", e);
+      setToast("Não consegui enviar a imagem de capa.");
+      setTimeout(() => setToast(null), 6000);
+    } finally {
+      setCapaUploading(false);
+    }
+  }
+
   function saveDemand(d) {
     const exists = demands.some((x) => x.id === d.id);
-    const list = exists ? demands.map((x) => (x.id === d.id ? d : x)) : [d, ...demands];
-    persistDemands(list);
+    if (exists) {
+      persistDemands(demands.map((x) => (x.id === d.id ? d : x)));
+    } else {
+      const menorOrdem = demands.reduce((min, x) => Math.min(min, x.ordem || 0), 0);
+      persistDemands([{ ...d, ordem: menorOrdem - 10 }, ...demands]);
+    }
     setDemandForm(null);
+  }
+
+  function reordenarDemandas(idArrastado, idAlvo) {
+    if (idArrastado === idAlvo) return;
+    const atual = [...demands].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+    const fromIdx = atual.findIndex((d) => d.id === idArrastado);
+    const toIdx = atual.findIndex((d) => d.id === idAlvo);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const [moved] = atual.splice(fromIdx, 1);
+    atual.splice(toIdx, 0, moved);
+    const renumerado = atual.map((d, i) => ({ ...d, ordem: i * 10 }));
+    persistDemands(renumerado);
   }
 
   function saveClient(c) {
@@ -1979,58 +2078,82 @@ export default function App() {
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
 
   const filteredDemands = useMemo(() => {
-    return demands.filter((d) => {
-      if (!mostrarFinalizadas && d.statusProducao === "Finalizada") return false;
-      if (filterCliente && d.clienteId !== filterCliente) return false;
-      if (search && !d.projeto.toLowerCase().includes(search.toLowerCase())) return false;
+    return demands
+      .filter((d) => {
+        if (!mostrarFinalizadas && d.statusProducao === "Finalizada") return false;
+        if (filterCliente && d.clienteId !== filterCliente) return false;
+        if (demandTipoFilter && d.tipo !== demandTipoFilter) return false;
+        if (demandStatusProducaoFilter && d.statusProducao !== demandStatusProducaoFilter) return false;
+        if (demandStatusAprovacaoFilter && d.statusAprovacao !== demandStatusAprovacaoFilter) return false;
+        if (demandDataInicio && (!d.dataEntrega || d.dataEntrega < demandDataInicio)) return false;
+        if (demandDataFim && (!d.dataEntrega || d.dataEntrega > demandDataFim)) return false;
+        if (search && !d.projeto.toLowerCase().includes(search.toLowerCase())) return false;
+        return true;
+      })
+      .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  }, [demands, filterCliente, demandTipoFilter, demandStatusProducaoFilter, demandStatusAprovacaoFilter, demandDataInicio, demandDataFim, search, mostrarFinalizadas]);
+
+  const filteredProposals = useMemo(() => {
+    let list = proposals.filter((p) => {
+      if (proposalClienteFilter && p.clienteId !== proposalClienteFilter) return false;
+      if (proposalStatusFilter && p.status !== proposalStatusFilter) return false;
       return true;
     });
-  }, [demands, filterCliente, search, mostrarFinalizadas]);
-
-  const relatorioDemandasFinalizadas = useMemo(() => {
-    return demands.filter((d) => d.statusProducao === "Finalizada" && (d.dataEntrega || "").slice(0, 4) === relatorioAno);
-  }, [demands, relatorioAno]);
-
-  const relatorioValorPorDemanda = useMemo(() => {
-    const map = new Map();
-    for (const d of relatorioDemandasFinalizadas) {
-      const valor = transacoes
-        .filter((t) => t.demandaId === d.id && t.tipo === "Receita")
-        .reduce((s, t) => s + (parseFloat(t.valor) || 0), 0);
-      map.set(d.id, valor);
+    if (proposalValorSort) {
+      list = [...list].sort((a, b) => {
+        const diff = Number(a.valorTotal || 0) - Number(b.valorTotal || 0);
+        return proposalValorSort === "asc" ? diff : -diff;
+      });
     }
-    return map;
-  }, [relatorioDemandasFinalizadas, transacoes]);
+    return list;
+  }, [proposals, proposalClienteFilter, proposalStatusFilter, proposalValorSort]);
 
-  const relatorioPorCliente = useMemo(() => {
-    const map = new Map();
-    for (const d of relatorioDemandasFinalizadas) {
-      const key = d.clienteId || "—";
-      if (!map.has(key)) map.set(key, { nome: clientName(d.clienteId), count: 0, valor: 0 });
-      const item = map.get(key);
-      item.count += 1;
-      item.valor += relatorioValorPorDemanda.get(d.id) || 0;
-    }
-    return Array.from(map.values()).sort((a, b) => b.count - a.count);
-  }, [relatorioDemandasFinalizadas, relatorioValorPorDemanda, clients]);
+  const relatorioStatsMes = useMemo(() => computeMonthStats(transacoes, relatorioMes), [transacoes, relatorioMes]);
 
-  const relatorioPorTipo = useMemo(() => {
-    const map = new Map();
-    for (const d of relatorioDemandasFinalizadas) {
-      const key = d.tipo || "—";
-      if (!map.has(key)) map.set(key, { tipo: key, count: 0, valor: 0 });
-      const item = map.get(key);
-      item.count += 1;
-      item.valor += relatorioValorPorDemanda.get(d.id) || 0;
-    }
-    return Array.from(map.values()).sort((a, b) => b.count - a.count);
-  }, [relatorioDemandasFinalizadas, relatorioValorPorDemanda]);
+  const relatorioPropostasDoMes = useMemo(
+    () => proposals.filter((p) => mesRef(p.dataGeracao) === relatorioMes),
+    [proposals, relatorioMes]
+  );
 
-  const relatorioTotais = useMemo(() => {
-    let valor = 0;
-    relatorioValorPorDemanda.forEach((v) => { valor += v; });
-    return { total: relatorioDemandasFinalizadas.length, valor };
-  }, [relatorioDemandasFinalizadas, relatorioValorPorDemanda]);
+  const relatorioPropostaStats = useMemo(() => {
+    const pendentes = relatorioPropostasDoMes.filter((p) => p.status === "Pendente").length;
+    const confirmadas = relatorioPropostasDoMes.filter((p) => p.status === "Confirmada").length;
+    const recusadas = relatorioPropostasDoMes.filter((p) => p.status === "Recusada").length;
+    const decididas = confirmadas + recusadas;
+    const taxaConversao = decididas > 0 ? Math.round((confirmadas / decididas) * 100) : 0;
+    const valorConfirmado = relatorioPropostasDoMes
+      .filter((p) => p.status === "Confirmada")
+      .reduce((s, p) => s + Number(p.valorTotal || 0), 0);
+    return { total: relatorioPropostasDoMes.length, pendentes, confirmadas, recusadas, taxaConversao, valorConfirmado };
+  }, [relatorioPropostasDoMes]);
+
+  const relatorioDemandasDoMes = useMemo(
+    () => demands.filter((d) => mesRef(d.dataEntrega) === relatorioMes),
+    [demands, relatorioMes]
+  );
+
+  const relatorioEntregasDoMes = useMemo(
+    () => relatorioDemandasDoMes.filter((d) => d.statusProducao === "Finalizada"),
+    [relatorioDemandasDoMes]
+  );
+
+  const relatorioEntregasBreakdown = useMemo(() => {
+    let noPrazo = 0, atraso = 0;
+    relatorioEntregasDoMes.forEach((d) => {
+      if (d.dataAprovacao && d.dataEntrega && d.dataAprovacao > d.dataEntrega) atraso += 1;
+      else noPrazo += 1;
+    });
+    return { noPrazo, atraso };
+  }, [relatorioEntregasDoMes]);
+
+  const relatorioDemandaFiltroCount = useMemo(() => {
+    if (!relatorioDemandaClienteFiltro && !relatorioDemandaTipoFiltro) return null;
+    return relatorioDemandasDoMes.filter(
+      (d) =>
+        (!relatorioDemandaClienteFiltro || d.clienteId === relatorioDemandaClienteFiltro) &&
+        (!relatorioDemandaTipoFiltro || d.tipo === relatorioDemandaTipoFiltro)
+    ).length;
+  }, [relatorioDemandasDoMes, relatorioDemandaClienteFiltro, relatorioDemandaTipoFiltro]);
 
   const stats = useMemo(() => {
     const atrasado = demands.filter((d) => getUrgencia(d).tone === "late").length;
@@ -2038,6 +2161,12 @@ export default function App() {
     const prontoExcluir = demands.filter((d) => getRetencao(d).ready).length;
     return { total: demands.length, atrasado, aguardando, prontoExcluir };
   }, [demands]);
+
+  const demandasStatsMes = useMemo(() => {
+    const doMes = demands.filter((d) => mesRef(d.dataEntrega) === monthAnchor);
+    const finalizadas = doMes.filter((d) => d.statusProducao === "Finalizada").length;
+    return { total: doMes.length, finalizadas };
+  }, [demands, monthAnchor]);
 
   const proposalStats = useMemo(() => {
     const pendentes = proposals.filter((p) => p.status === "Pendente").length;
@@ -2153,6 +2282,30 @@ export default function App() {
     () => clients.filter((c) => mesRef(c.criadoEm) === monthAnchor).length,
     [clients, monthAnchor]
   );
+
+  const metasResumoItems = useMemo(() => {
+    const items = [];
+    const metaFin = parseFloat(metas[monthAnchor]) || 0;
+    items.push({
+      key: "meta-financeira",
+      label: metaFin > 0 ? "da meta financeira do mês" : "faturado no mês",
+      display: metaFin > 0
+        ? Math.round((financeStatsMes.totalReceita / metaFin) * 100) + "%"
+        : (hideValues ? "R$ ••••" : "R$ " + financeStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 0 })),
+    });
+    const metaNovos = parseFloat(metasClientesNovos[monthAnchor]) || 0;
+    items.push({
+      key: "meta-novos-clientes",
+      label: metaNovos > 0 ? "da meta de novos clientes" : "novos clientes no mês",
+      display: metaNovos > 0 ? Math.round((novosClientesMes / metaNovos) * 100) + "%" : String(novosClientesMes),
+    });
+    return items;
+  }, [metas, metasClientesNovos, monthAnchor, financeStatsMes, novosClientesMes, hideValues]);
+
+  const taxaConversaoPropostas = useMemo(() => {
+    const decididas = proposalStats.confirmadas + proposalStats.recusadas;
+    return decididas > 0 ? Math.round((proposalStats.confirmadas / decididas) * 100) : 0;
+  }, [proposalStats]);
 
   const resumoPorCategoria = useMemo(() => {
     const num = (v) => parseFloat(v) || 0;
@@ -2276,6 +2429,8 @@ export default function App() {
     if (financeFilter === "receitas") list = list.filter((t) => t.tipo === "Receita");
     else if (financeFilter === "despesas") list = list.filter((t) => t.tipo === "Despesa");
     else if (financeFilter === "atrasadas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
+    else if (financeFilter === "pagas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Pago");
+    else if (financeFilter === "pendentes") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Pendente");
     if (tagFilterIds.length > 0) list = list.filter((t) => (t.tags || []).some((id) => tagFilterIds.includes(id)));
     if (financeClienteFilter) list = list.filter((t) => t.clienteId === financeClienteFilter);
     return list;
@@ -2407,9 +2562,40 @@ export default function App() {
         .tag-pill-btn { cursor: pointer; font-family: inherit; margin: 0 5px 5px 0; }
         .tag-pill-btn.selected { background: var(--tag-color); color: #14161a; }
         .tag-cell { position: relative; display: flex; flex-wrap: wrap; gap: 4px; }
+        .field .tag-cell { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 8px 10px; align-items: center; }
         .tag-cell-btn { background: none; border: none; padding: 0; cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 22px; }
         .tag-cell-empty { color: var(--text-dim); font-size: 11.5px; border: 1px dashed var(--border); padding: 3px 8px; border-radius: 20px; }
         .tag-cell-empty:hover { border-color: var(--amber); color: var(--amber); }
+
+        .filter-menu { position: relative; display: inline-block; }
+        .filter-menu-btn {
+          position: relative; display: flex; align-items: center; justify-content: center;
+          width: 34px; height: 34px; background: var(--surface); border: 1px solid var(--border);
+          color: var(--text-dim); border-radius: 8px; cursor: pointer;
+        }
+        .filter-menu-btn:hover { color: var(--text); border-color: var(--text-dim); }
+        .filter-menu-btn.has-active { color: var(--amber); border-color: var(--amber); }
+        .filter-menu-badge {
+          position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 3px;
+          border-radius: 20px; background: var(--amber); color: #1a1305; font-size: 10px; font-weight: 700;
+          display: flex; align-items: center; justify-content: center; line-height: 1;
+        }
+        .filter-menu-popover {
+          position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 240px;
+          background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; flex-direction: column; gap: 10px;
+        }
+        .filter-menu-popover.align-right { left: auto; right: 0; }
+        .filter-menu-field { display: flex; flex-direction: column; gap: 4px; }
+        .filter-menu-field label { font-size: 11px; color: var(--text-dim); }
+        .filter-menu-field select, .filter-menu-field input { width: 100%; }
+        .filter-menu-row { display: flex; gap: 8px; }
+        .filter-menu-row .filter-menu-field { flex: 1; }
+        .filter-menu-clear {
+          background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 6px;
+          padding: 6px; font-size: 11.5px; cursor: pointer; margin-top: 2px;
+        }
+        .filter-menu-clear:hover { border-color: var(--red); color: var(--red); }
 
         .tag-picker {
           position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; width: 240px;
@@ -2461,16 +2647,25 @@ export default function App() {
         .finance-chart-svg { width: 100%; height: auto; overflow: visible; }
         .chart-gridline { stroke: var(--border); stroke-width: 1; }
         .chart-zeroline { stroke: var(--text-dim); stroke-width: 1; }
-        .chart-axis-label { fill: var(--text-dim); font-size: 10px; font-family: 'JetBrains Mono', monospace; }
-        .chart-bar-receita { fill: var(--teal); opacity: 0.85; }
-        .chart-bar-despesa { fill: var(--red); opacity: 0.75; }
-        .chart-line-margem { stroke: var(--amber); stroke-width: 2.2; }
-        .chart-dot-margem { fill: var(--amber); }
-        .chart-line-meta { stroke: var(--violet); stroke-width: 1.6; stroke-dasharray: 5 4; }
+        .chart-axis-label { fill: var(--text-dim); font-size: 10.5px; font-family: 'JetBrains Mono', monospace; }
+        .chart-bar-receita { fill: var(--teal); opacity: 0.9; }
+        .chart-bar-despesa { fill: var(--red); opacity: 0.85; }
+        .chart-bar-margem { fill: var(--amber); opacity: 0.9; }
+        .chart-bar-margem.negativa { fill: var(--red); }
+        .chart-tick-meta { stroke: var(--violet); stroke-width: 1.6; stroke-dasharray: 4 3; }
         .chart-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: 11.5px; color: var(--text-dim); }
         .chart-legend-item { display: flex; align-items: center; gap: 6px; }
         .chart-legend-swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
 
+        .report-section { border: 1px solid var(--border); border-radius: 14px; margin-bottom: 14px; overflow: hidden; background: rgba(255,255,255,0.02); }
+        .report-section-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: none; border: none; color: var(--text); padding: 16px 18px; cursor: pointer; text-align: left; }
+        .report-section-head:hover { background: rgba(255,255,255,0.03); }
+        .report-section-titles { display: flex; flex-direction: column; gap: 3px; }
+        .report-section-title { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.4px; }
+        .report-section-subtitle { font-size: 12px; color: var(--text-dim); }
+        .report-section-chevron { flex-shrink: 0; transition: transform 0.15s ease; color: var(--text-dim); }
+        .report-section-chevron.open { transform: rotate(90deg); }
+        .report-section-body { padding: 4px 18px 20px; border-top: 1px solid var(--border); }
         .metas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; align-items: start; }
         .metas-card { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; backdrop-filter: blur(8px); }
         .metas-card h4 { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.4px; margin: 0 0 12px 0; }
@@ -2564,14 +2759,18 @@ export default function App() {
         .carousel-dot { width: 7px; height: 7px; border-radius: 50%; border: none; background: var(--border); cursor: pointer; padding: 0; transition: background 0.2s, transform 0.2s; }
         .carousel-dot:hover { background: var(--text-dim); }
         .carousel-dot.active { background: var(--brand); transform: scale(1.3); }
+        .notifications-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 28px 0 28px; }
         .followup-banner {
-          margin: 4px 28px 0 28px; background: var(--red-dark); border: 1px solid var(--red); color: #ffb4ac;
-          padding: 10px 14px; border-radius: 8px; display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+          background: var(--red-dark); border: 1px solid var(--red); color: #ffb4ac;
+          padding: 7px 8px 7px 12px; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px;
+          flex: 0 1 auto; max-width: 340px;
         }
-        .followup-banner + .followup-banner { margin-top: 8px; }
+        .followup-banner span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .followup-banner svg { flex-shrink: 0; }
-        .followup-link { margin-left: auto; background: none; border: 1px solid var(--red); color: #ffb4ac; padding: 4px 10px; border-radius: 6px; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+        .followup-link { flex-shrink: 0; background: none; border: 1px solid var(--red); color: #ffb4ac; padding: 3px 8px; border-radius: 6px; font-size: 11px; cursor: pointer; white-space: nowrap; }
         .followup-link:hover { background: var(--red); color: #2a0a07; }
+        .followup-dismiss { flex-shrink: 0; background: none; border: none; color: inherit; opacity: 0.6; padding: 2px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .followup-dismiss:hover { opacity: 1; }
         .followup-banner.tone-wait { background: var(--amber-dark); border-color: var(--amber); color: var(--amber); }
         .followup-banner.tone-wait .followup-link { border-color: var(--amber); color: var(--amber); }
         .followup-banner.tone-wait .followup-link:hover { background: var(--amber); color: #1a1305; }
@@ -2724,6 +2923,10 @@ export default function App() {
         .video-subrow-item { display: flex; align-items: center; gap: 10px; }
         .video-subrow-name { flex: 1; font-size: 12.5px; color: var(--text); }
         .video-subrow-item select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 170px; }
+        .demand-status-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-family: inherit; }
+        .demand-drag-handle { display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: grab; }
+        .demand-drag-handle:active { cursor: grabbing; }
+        .demand-drag-handle:hover { color: var(--text); }
         .empty { text-align: center; padding: 50px 0; color: var(--text-dim); }
         .overlay { position: fixed; inset: 0; background: rgba(10,8,16,0.65); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
         .modal { background: rgba(29, 32, 37, 0.92); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; width: 480px; max-width: 100%; max-height: 90vh; overflow-y: auto; padding: 24px; box-shadow: 0 30px 70px rgba(0,0,0,0.5); }
@@ -2815,9 +3018,6 @@ export default function App() {
           <button className={"rail-btn " + (tab === "relatorios" ? "active" : "")} onClick={() => setTab("relatorios")}>
             <TrendingUp size={16} /> <span className="rail-label">Relatórios</span>
           </button>
-          <button className="rail-btn disabled" disabled>
-            <span className="rail-label">Entregáveis</span> <span className="rail-tag">em breve</span>
-          </button>
           <div className="rail-divider" />
           <button className={"rail-btn " + (tab === "processos" ? "active" : "")} onClick={() => setTab("processos")}>
             <Wrench size={16} /> <span className="rail-label">Processos internos</span>
@@ -2902,13 +3102,24 @@ export default function App() {
           </div>
 
           <div className="slate">
-            {notifications.map((n) => (
-              <div key={n.id} className={"followup-banner tone-" + n.tone}>
-                <AlertTriangle size={15} />
-                <span>{n.text}</span>
-                <button className="followup-link" onClick={() => setTab(n.goto)}>{n.label}</button>
+            {notifications.filter((n) => !dismissedNotifications.has(n.id)).length > 0 && (
+              <div className="notifications-row">
+                {notifications.filter((n) => !dismissedNotifications.has(n.id)).map((n) => (
+                  <div key={n.id} className={"followup-banner tone-" + n.tone}>
+                    <AlertTriangle size={13} />
+                    <span>{n.text}</span>
+                    <button className="followup-link" onClick={() => setTab(n.goto)}>{n.label}</button>
+                    <button
+                      className="followup-dismiss"
+                      title="Remover notificação"
+                      onClick={() => setDismissedNotifications((prev) => new Set(prev).add(n.id))}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
 
             <StatsCarousel
               panels={[
@@ -2925,26 +3136,15 @@ export default function App() {
                   ),
                 },
                 {
-                  key: "propostas",
-                  label: "Resultados de propostas",
+                  key: "metas",
+                  label: "Metas e conversão de propostas",
                   content: (
                     <div className="stats-row">
-                      <div className="stat"><div className="n">{proposalStats.total}</div><div className="l">propostas geradas</div></div>
-                      <div className="stat wait"><div className="n">{proposalStats.pendentes}</div><div className="l">pendentes</div></div>
-                      <div className="stat ready"><div className="n">{proposalStats.confirmadas}</div><div className="l">confirmadas</div></div>
-                      <div className="stat warn"><div className="n">{followUps.length}</div><div className="l">precisam follow up</div></div>
-                    </div>
-                  ),
-                },
-                {
-                  key: "financeiro",
-                  label: "Resultados financeiros",
-                  content: (
-                    <div className="stats-row">
-                      <div className="stat ready"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.recebido.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">recebido no mês</div></div>
-                      <div className="stat wait"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.aReceber.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">a receber no mês</div></div>
-                      <div className="stat warn"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">despesas no mês</div></div>
-                      <div className="stat"><div className="n">{hideValues ? "R$ ••••" : "R$ " + financeStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">saldo no mês</div></div>
+                      <div className="stat"><div className="n">{demandasStatsMes.finalizadas}/{demandasStatsMes.total}</div><div className="l">demandas no mês</div></div>
+                      <div className="stat ready"><div className="n">{taxaConversaoPropostas}%</div><div className="l">conversão de propostas</div></div>
+                      {metasResumoItems.map((m) => (
+                        <div className="stat" key={m.key}><div className="n">{m.display}</div><div className="l">{m.label}</div></div>
+                      ))}
                     </div>
                   ),
                 },
@@ -3055,12 +3255,61 @@ export default function App() {
             <>
               <div className="toolbar">
                 <input placeholder="Buscar projeto…" value={search} onChange={(e) => setSearch(e.target.value)} />
-                <select value={filterCliente} onChange={(e) => setFilterCliente(e.target.value)}>
-                  <option value="">Todos os clientes</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nome}</option>
-                  ))}
-                </select>
+                <FilterMenu
+                  id="demandas"
+                  openId={openFilterMenu}
+                  setOpenId={setOpenFilterMenu}
+                  activeCount={[filterCliente, demandTipoFilter, demandStatusProducaoFilter, demandStatusAprovacaoFilter, demandDataInicio, demandDataFim].filter(Boolean).length}
+                >
+                  <div className="filter-menu-field">
+                    <label>Cliente</label>
+                    <select value={filterCliente} onChange={(e) => setFilterCliente(e.target.value)}>
+                      <option value="">Todos os clientes</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>{c.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="filter-menu-field">
+                    <label>Tipo</label>
+                    <select value={demandTipoFilter} onChange={(e) => setDemandTipoFilter(e.target.value)}>
+                      <option value="">Todos os tipos</option>
+                      {tiposProducao.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="filter-menu-field">
+                    <label>Produção</label>
+                    <select value={demandStatusProducaoFilter} onChange={(e) => setDemandStatusProducaoFilter(e.target.value)}>
+                      <option value="">Toda produção</option>
+                      {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div className="filter-menu-field">
+                    <label>Aprovação</label>
+                    <select value={demandStatusAprovacaoFilter} onChange={(e) => setDemandStatusAprovacaoFilter(e.target.value)}>
+                      <option value="">Toda aprovação</option>
+                      {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div className="filter-menu-row">
+                    <div className="filter-menu-field">
+                      <label>Entrega de</label>
+                      <input type="date" value={demandDataInicio} onChange={(e) => setDemandDataInicio(e.target.value)} />
+                    </div>
+                    <div className="filter-menu-field">
+                      <label>Entrega até</label>
+                      <input type="date" value={demandDataFim} onChange={(e) => setDemandDataFim(e.target.value)} />
+                    </div>
+                  </div>
+                  {(filterCliente || demandTipoFilter || demandStatusProducaoFilter || demandStatusAprovacaoFilter || demandDataInicio || demandDataFim) && (
+                    <button
+                      className="filter-menu-clear"
+                      onClick={() => { setFilterCliente(""); setDemandTipoFilter(""); setDemandStatusProducaoFilter(""); setDemandStatusAprovacaoFilter(""); setDemandDataInicio(""); setDemandDataFim(""); }}
+                    >
+                      Limpar filtros
+                    </button>
+                  )}
+                </FilterMenu>
                 <button className="btn-primary" onClick={() => setDemandForm(emptyDemand())}>
                   <Plus size={15} /> Nova demanda
                 </button>
@@ -3076,6 +3325,7 @@ export default function App() {
                 <table>
                   <thead>
                     <tr>
+                      <th style={{ width: 22 }}></th>
                       <th style={{ width: 30 }}></th>
                       <th>Projeto</th>
                       <th>Cliente</th>
@@ -3083,14 +3333,12 @@ export default function App() {
                       <th>Aprovação</th>
                       <th>Urgência</th>
                       <th>Entrega</th>
-                      <th>Retenção</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredDemands.map((d) => {
                       const urg = getUrgencia(d);
-                      const ret = getRetencao(d);
                       const prog = videoProgress(d);
                       const expanded = expandedDemands.has(d.id);
                       return (
@@ -3098,7 +3346,20 @@ export default function App() {
                           <tr
                             className={prog ? "clickable-row" : ""}
                             onClick={() => prog && toggleExpandDemand(d.id)}
+                            onDragOver={(e) => { if (draggedDemandId) e.preventDefault(); }}
+                            onDrop={(e) => { e.preventDefault(); if (draggedDemandId) { reordenarDemandas(draggedDemandId, d.id); setDraggedDemandId(null); } }}
                           >
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <span
+                                className="demand-drag-handle"
+                                draggable
+                                onDragStart={() => setDraggedDemandId(d.id)}
+                                onDragEnd={() => setDraggedDemandId(null)}
+                                title="Arrastar para reordenar"
+                              >
+                                <GripVertical size={14} />
+                              </span>
+                            </td>
                             <td>
                               {prog && <span className="expand-btn" title="Ver vídeos">{expanded ? "▾" : "▸"}</span>}
                             </td>
@@ -3113,15 +3374,17 @@ export default function App() {
                             <td>{clientName(d.clienteId)}</td>
                             <td onClick={(e) => e.stopPropagation()}>
                               <select
+                                className="demand-status-select"
                                 value={d.statusProducao}
                                 onChange={(e) => updateDemandField(d.id, "statusProducao", e.target.value)}
                                 style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "producao", d.statusProducao) }}
                               >
-                                {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                                {STATUS_PRODUCAO.filter((s) => s !== "Finalizada" || s === d.statusProducao).map((s) => <option key={s} value={s}>{s}</option>)}
                               </select>
                             </td>
                             <td onClick={(e) => e.stopPropagation()}>
                               <select
+                                className="demand-status-select"
                                 value={d.statusAprovacao}
                                 onChange={(e) => updateDemandField(d.id, "statusAprovacao", e.target.value)}
                                 style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "aprovacao", d.statusAprovacao) }}
@@ -3131,11 +3394,6 @@ export default function App() {
                             </td>
                             <td><span className={"badge " + TONE_CLASS[urg.tone]}>{urg.label}</span></td>
                             <td className="mono">{fmtDate(d.dataEntrega)}</td>
-                            <td>
-                              <span className={"badge " + (ret.ready ? "badge-ready" : "badge-locked")}>
-                                {ret.ready ? "Liberado" : ret.label === "Aguardando aprovação" ? "Bloqueado" : ret.label}
-                              </span>
-                            </td>
                             <td onClick={(e) => e.stopPropagation()}>
                               <div className="row-actions">
                                 <button className="icon-btn" onClick={() => setDemandForm(d)}><Pencil size={13} /></button>
@@ -3145,7 +3403,7 @@ export default function App() {
                           </tr>
                           {expanded && prog && (
                             <tr className="video-subrow">
-                              <td colSpan={9}>
+                              <td colSpan={8}>
                                 <div className="video-sublist">
                                   {d.itens.map((v, idx) => (
                                     <div key={v.id} className="video-subrow-item">
@@ -3254,6 +3512,37 @@ export default function App() {
               {proposals.length === 0 ? (
                 <div className="empty">Nenhuma proposta enviada do Gerador ainda. Ao clicar em "Salvar cliente e proposta no Painel" lá dentro, ela aparece aqui.</div>
               ) : (
+                <>
+                  <div className="toolbar">
+                    <FilterMenu
+                      id="propostas"
+                      openId={openFilterMenu}
+                      setOpenId={setOpenFilterMenu}
+                      activeCount={[proposalClienteFilter, proposalStatusFilter].filter(Boolean).length}
+                    >
+                      <div className="filter-menu-field">
+                        <label>Cliente</label>
+                        <select value={proposalClienteFilter} onChange={(e) => setProposalClienteFilter(e.target.value)}>
+                          <option value="">Todos os clientes</option>
+                          {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                        </select>
+                      </div>
+                      <div className="filter-menu-field">
+                        <label>Status</label>
+                        <select value={proposalStatusFilter} onChange={(e) => setProposalStatusFilter(e.target.value)}>
+                          <option value="">Todos os status</option>
+                          <option value="Pendente">Aguardando</option>
+                          <option value="Confirmada">Aprovadas</option>
+                          <option value="Recusada">Recusadas</option>
+                        </select>
+                      </div>
+                      {(proposalClienteFilter || proposalStatusFilter) && (
+                        <button className="filter-menu-clear" onClick={() => { setProposalClienteFilter(""); setProposalStatusFilter(""); }}>
+                          Limpar filtros
+                        </button>
+                      )}
+                    </FilterMenu>
+                  </div>
                 <table>
                   <thead>
                     <tr>
@@ -3261,13 +3550,21 @@ export default function App() {
                       <th>Cliente</th>
                       <th>Tipo</th>
                       <th>Data de geração</th>
-                      <th>Valor</th>
+                      <th
+                        onClick={() => setProposalValorSort(proposalValorSort === "desc" ? "asc" : "desc")}
+                        style={{ cursor: "pointer", userSelect: "none" }}
+                        title="Ordenar por valor"
+                      >
+                        Valor {proposalValorSort === "asc" ? "▲" : proposalValorSort === "desc" ? "▼" : ""}
+                      </th>
                       <th>Status</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {proposals.map((p) => {
+                    {filteredProposals.length === 0 ? (
+                      <tr><td colSpan={7} className="empty">Nenhuma proposta encontrada com esses filtros.</td></tr>
+                    ) : filteredProposals.map((p) => {
                       const alerta = precisaFollowUp(p);
                       return (
                         <tr key={p.id}>
@@ -3315,6 +3612,7 @@ export default function App() {
                     })}
                   </tbody>
                 </table>
+                </>
               )}
             </>
           ) : tab === "financeiro" ? (
@@ -3355,18 +3653,38 @@ export default function App() {
                 )}
               </div>
               <div className="toolbar">
-                <select value={financeFilter} onChange={(e) => setFinanceFilter(e.target.value)}>
-                  <option value="todos">Todas as transações</option>
-                  <option value="receitas">Só receitas</option>
-                  <option value="despesas">Só despesas</option>
-                  <option value="atrasadas">Só atrasadas</option>
-                </select>
-                <select value={financeClienteFilter} onChange={(e) => setFinanceClienteFilter(e.target.value)}>
-                  <option value="">Todos os clientes</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nome}</option>
-                  ))}
-                </select>
+                <FilterMenu
+                  id="financeiro"
+                  openId={openFilterMenu}
+                  setOpenId={setOpenFilterMenu}
+                  activeCount={(financeFilter !== "todos" ? 1 : 0) + (financeClienteFilter ? 1 : 0)}
+                >
+                  <div className="filter-menu-field">
+                    <label>Transações</label>
+                    <select value={financeFilter} onChange={(e) => setFinanceFilter(e.target.value)}>
+                      <option value="todos">Todas as transações</option>
+                      <option value="receitas">Só receitas</option>
+                      <option value="despesas">Só despesas</option>
+                      <option value="atrasadas">Só atrasadas</option>
+                      <option value="pagas">Só pagas</option>
+                      <option value="pendentes">Só pendentes</option>
+                    </select>
+                  </div>
+                  <div className="filter-menu-field">
+                    <label>Cliente</label>
+                    <select value={financeClienteFilter} onChange={(e) => setFinanceClienteFilter(e.target.value)}>
+                      <option value="">Todos os clientes</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>{c.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {(financeFilter !== "todos" || financeClienteFilter) && (
+                    <button className="filter-menu-clear" onClick={() => { setFinanceFilter("todos"); setFinanceClienteFilter(""); }}>
+                      Limpar filtros
+                    </button>
+                  )}
+                </FilterMenu>
                 <button className="btn-despesa" onClick={() => setTransacaoForm({ ...emptyTransacao("Despesa"), data: monthAnchor + "-05" })}>
                   <Plus size={14} />Nova despesa
                 </button>
@@ -3458,9 +3776,9 @@ export default function App() {
                           </td>
                           <td>{t.categoria}</td>
                           <td>{t.tipo === "Despesa" ? (t.natureza || "Variável") : "—"}</td>
-                          <td className="tag-cell">
+                          <td>
                             {t.tipo === "Despesa" ? (
-                              <>
+                              <div className="tag-cell">
                                 <button className="tag-cell-btn" onClick={(e) => { e.stopPropagation(); setTagPopoverFor(tagPopoverFor === t.id ? null : t.id); }}>
                                   {tTags.length === 0 ? (
                                     <span className="tag-cell-empty">+ tag</span>
@@ -3482,7 +3800,7 @@ export default function App() {
                                     onClose={() => setTagPopoverFor(null)}
                                   />
                                 )}
-                              </>
+                              </div>
                             ) : (
                               "—"
                             )}
@@ -3540,18 +3858,6 @@ export default function App() {
                   <div className="metas-grid">
                     <div className="metas-card">
                       <h4>Meta de faturamento — {mesLabel(monthAnchor)}</h4>
-                      <div className="metas-input-row">
-                        <input
-                          type="number"
-                          min="0"
-                          step="100"
-                          placeholder="Ex: 15000"
-                          value={metaInputValue}
-                          onChange={(e) => setMetaInputValue(e.target.value)}
-                        />
-                        <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => setMetaDoMes(monthAnchor, metaInputValue)}>Salvar</button>
-                      </div>
-
                       {metaValor > 0 ? (
                         <>
                           <GoalGauge pct={pct} size={132} />
@@ -3566,7 +3872,7 @@ export default function App() {
                           </div>
                         </>
                       ) : (
-                        <div className="empty" style={{ padding: "20px 0" }}>Defina uma meta pra este mês pra acompanhar o progresso.</div>
+                        <div className="empty" style={{ padding: "20px 0" }}>Nenhuma meta definida pra este mês. Defina em Configurações → Metas.</div>
                       )}
                     </div>
 
@@ -3585,17 +3891,6 @@ export default function App() {
 
                     <div className="metas-card">
                       <h4>Faturamento anual — {anoAtual}</h4>
-                      <div className="metas-input-row">
-                        <input
-                          type="number"
-                          min="0"
-                          step="1000"
-                          placeholder="Ex: 180000"
-                          value={metaAnualInputValue}
-                          onChange={(e) => setMetaAnualInputValue(e.target.value)}
-                        />
-                        <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => setMetaAnual(anoAtual, metaAnualInputValue)}>Salvar</button>
-                      </div>
                       {metaAnualValor > 0 ? (
                         <>
                           <GoalGauge pct={pctAnual} size={132} />
@@ -3606,23 +3901,12 @@ export default function App() {
                           </div>
                         </>
                       ) : (
-                        <div className="empty" style={{ padding: "20px 0" }}>Defina uma meta anual pra acompanhar o faturamento de {anoAtual}.</div>
+                        <div className="empty" style={{ padding: "20px 0" }}>Nenhuma meta anual definida. Defina em Configurações → Metas.</div>
                       )}
                     </div>
 
                     <div className="metas-card">
                       <h4>Novos clientes — {mesLabel(monthAnchor)}</h4>
-                      <div className="metas-input-row">
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          placeholder="Ex: 3"
-                          value={metaClientesInputValue}
-                          onChange={(e) => setMetaClientesInputValue(e.target.value)}
-                        />
-                        <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => setMetaClientesDoMes(monthAnchor, metaClientesInputValue)}>Salvar</button>
-                      </div>
                       {metaClientesValor > 0 ? (
                         <>
                           <GoalGauge pct={pctClientes} size={132} />
@@ -3633,7 +3917,7 @@ export default function App() {
                         </>
                       ) : (
                         <div className="empty" style={{ padding: "20px 0" }}>
-                          Defina quantos clientes novos você quer conquistar este mês.
+                          Nenhuma meta definida. Defina em Configurações → Metas.
                           <br />Novos clientes cadastrados no mês: <b>{novosClientesMes}</b>
                         </div>
                       )}
@@ -3652,14 +3936,32 @@ export default function App() {
                 <div className="stat"><div className="n">{equipStats.emprestado}</div><div className="l">emprestados</div></div>
               </div>
               <div className="toolbar">
-                <select value={equipFiltroCategoria} onChange={(e) => setEquipFiltroCategoria(e.target.value)}>
-                  <option value="">Todas as categorias</option>
-                  {categoriasEquipamento.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select value={equipFiltroStatus} onChange={(e) => setEquipFiltroStatus(e.target.value)}>
-                  <option value="">Todos os status</option>
-                  {STATUS_EQUIP.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <FilterMenu
+                  id="equipamentos"
+                  openId={openFilterMenu}
+                  setOpenId={setOpenFilterMenu}
+                  activeCount={[equipFiltroCategoria, equipFiltroStatus].filter(Boolean).length}
+                >
+                  <div className="filter-menu-field">
+                    <label>Categoria</label>
+                    <select value={equipFiltroCategoria} onChange={(e) => setEquipFiltroCategoria(e.target.value)}>
+                      <option value="">Todas as categorias</option>
+                      {categoriasEquipamento.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="filter-menu-field">
+                    <label>Status</label>
+                    <select value={equipFiltroStatus} onChange={(e) => setEquipFiltroStatus(e.target.value)}>
+                      <option value="">Todos os status</option>
+                      {STATUS_EQUIP.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  {(equipFiltroCategoria || equipFiltroStatus) && (
+                    <button className="filter-menu-clear" onClick={() => { setEquipFiltroCategoria(""); setEquipFiltroStatus(""); }}>
+                      Limpar filtros
+                    </button>
+                  )}
+                </FilterMenu>
                 <button className="btn-ghost" onClick={baixarModeloEquipamentos}>
                   <FileText size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Baixar modelo
                 </button>
@@ -3753,94 +4055,104 @@ export default function App() {
           ) : tab === "relatorios" ? (
             <>
               <div className="month-nav">
-                <button className="icon-btn" onClick={() => setRelatorioAno(String(Number(relatorioAno) - 1))}><ChevronLeft size={14} /></button>
-                <div className="month-nav-label">{relatorioAno}</div>
-                <button className="icon-btn" onClick={() => setRelatorioAno(String(Number(relatorioAno) + 1))}><ChevronRight size={14} /></button>
-                <button className="btn-ghost kanban-today-btn" onClick={() => setRelatorioAno(todayISO().slice(0, 4))}>Ano atual</button>
+                <button className="icon-btn" onClick={() => setRelatorioMes(addMonthsISO(relatorioMes, -1))}><ChevronLeft size={14} /></button>
+                <div className="month-nav-label">{mesLabel(relatorioMes)}</div>
+                <button className="icon-btn" onClick={() => setRelatorioMes(addMonthsISO(relatorioMes, 1))}><ChevronRight size={14} /></button>
+                <button className="btn-ghost kanban-today-btn" onClick={() => setRelatorioMes(mesRef(todayISO()))}>Mês atual</button>
               </div>
 
-              <div className="finance-cards" style={{ marginBottom: 20 }}>
-                <div className="stat ready">
-                  <div className="stat-icon-sq teal"><CheckCircle2 size={16} /></div>
-                  <div className="n">{relatorioTotais.total}</div><div className="l">entregas finalizadas em {relatorioAno}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-icon-sq teal"><Wallet size={16} /></div>
-                  <div className="n">R$ {relatorioTotais.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">faturado (vinculado às entregas)</div>
-                </div>
-              </div>
-
-              {relatorioDemandasFinalizadas.length === 0 ? (
-                <div className="empty">Nenhuma demanda finalizada em {relatorioAno} ainda.</div>
-              ) : (
-                <>
-                  <div className="grid2" style={{ gap: 24, alignItems: "start" }}>
-                    <div>
-                      <h3 className="config-section-title">Por cliente</h3>
-                      <table>
-                        <thead><tr><th>Cliente</th><th>Entregas</th><th>Faturado</th></tr></thead>
-                        <tbody>
-                          {relatorioPorCliente.map((r) => (
-                            <tr key={r.nome}>
-                              <td className="proj">{r.nome}</td>
-                              <td className="mono">{r.count}</td>
-                              <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div>
-                      <h3 className="config-section-title">Por tipo de produção</h3>
-                      <table>
-                        <thead><tr><th>Tipo</th><th>Entregas</th><th>Faturado</th></tr></thead>
-                        <tbody>
-                          {relatorioPorTipo.map((r) => (
-                            <tr key={r.tipo}>
-                              <td className="proj">
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: corDoStatusComMapa(coresStatus, "tipo", r.tipo), flexShrink: 0 }} />
-                                  {r.tipo}
-                                </span>
-                              </td>
-                              <td className="mono">{r.count}</td>
-                              <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+              <ReportSection
+                title="Financeiro"
+                subtitle={"R$ " + relatorioStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 0 }) + " faturado · margem de R$ " + relatorioStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}
+                defaultOpen
+              >
+                <div className="metas-grid">
+                  <div className="metas-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                    {(() => {
+                      const metaValor = parseFloat(metas[relatorioMes]) || 0;
+                      const faturado = relatorioStatsMes.totalReceita;
+                      const pct = metaValor > 0 ? (faturado / metaValor) * 100 : 0;
+                      return metaValor > 0 ? (
+                        <>
+                          <GoalGauge pct={pct} label="Meta financeira do mês" sublabel={"R$ " + faturado.toLocaleString("pt-BR", { minimumFractionDigits: 0 })} />
+                          <div style={{ width: "100%" }}>
+                            <div className="metas-line"><span>Meta</span><b>R$ {metaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                            <div className="metas-line"><span>Faturado</span><b>R$ {faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                            <div className="metas-line"><span>% da meta</span><b>{pct.toFixed(0)}%</b></div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="empty" style={{ padding: "20px 0" }}>Nenhuma meta definida pra {mesLabel(relatorioMes)}. Defina em Configurações → Metas.</div>
+                      );
+                    })()}
                   </div>
+                  <div className="metas-card">
+                    <h4>Margem de lucro — {mesLabel(relatorioMes)}</h4>
+                    <div className="metas-line"><span>Entradas</span><b>R$ {relatorioStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Saídas</span><b>R$ {relatorioStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Margem</span><b>R$ {relatorioStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                  </div>
+                </div>
+              </ReportSection>
 
-                  <h3 className="config-section-title" style={{ marginTop: 28 }}>Demandas finalizadas em {relatorioAno}</h3>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Projeto</th><th>Cliente</th><th>Tipo</th><th>Entrega</th><th>Faturado</th><th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {relatorioDemandasFinalizadas.map((d) => (
-                        <tr key={d.id}>
-                          <td className="proj">{d.projeto || "(sem nome)"}</td>
-                          <td>{clientName(d.clienteId)}</td>
-                          <td>
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: corDoStatusComMapa(coresStatus, "tipo", d.tipo), flexShrink: 0 }} />
-                              {d.tipo}
-                            </span>
-                          </td>
-                          <td className="mono">{fmtDate(d.dataEntrega)}</td>
-                          <td className="mono">R$ {(relatorioValorPorDemanda.get(d.id) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                          <td>
-                            <button className="icon-btn" onClick={() => setDemandForm(d)}><Pencil size={13} /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
+              <ReportSection
+                title="Propostas"
+                subtitle={relatorioPropostaStats.total + " propostas geradas · " + relatorioPropostaStats.taxaConversao + "% de conversão"}
+              >
+                <div className="stats-row">
+                  <div className="stat"><div className="n">{relatorioPropostaStats.total}</div><div className="l">propostas geradas</div></div>
+                  <div className="stat wait"><div className="n">{relatorioPropostaStats.pendentes}</div><div className="l">aguardando resposta</div></div>
+                  <div className="stat ready"><div className="n">{relatorioPropostaStats.confirmadas}</div><div className="l">confirmadas</div></div>
+                  <div className="stat warn"><div className="n">{relatorioPropostaStats.recusadas}</div><div className="l">recusadas</div></div>
+                  <div className="stat"><div className="n">{relatorioPropostaStats.taxaConversao}%</div><div className="l">taxa de conversão</div></div>
+                  <div className="stat"><div className="n">R$ {relatorioPropostaStats.valorConfirmado.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</div><div className="l">valor confirmado</div></div>
+                </div>
+              </ReportSection>
+
+              <ReportSection
+                title="Demandas"
+                subtitle={relatorioEntregasDoMes.length + " de " + relatorioDemandasDoMes.length + " entregues em " + mesLabel(relatorioMes)}
+              >
+                <div className="stats-row">
+                  <div className="stat"><div className="n">{relatorioDemandasDoMes.length}</div><div className="l">demandas do mês</div></div>
+                  <div
+                    className="stat ready"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setRelatorioEntregasAberto((v) => !v)}
+                    title="Ver detalhamento de no prazo x em atraso"
+                  >
+                    <div className="n">{relatorioEntregasDoMes.length}</div><div className="l">entregues {relatorioEntregasAberto ? "▾" : "▸"}</div>
+                  </div>
+                </div>
+                {relatorioEntregasAberto && (
+                  <div className="stats-row" style={{ marginTop: 10 }}>
+                    <div className="stat ready"><div className="n">{relatorioEntregasBreakdown.noPrazo}</div><div className="l">no prazo</div></div>
+                    <div className="stat warn"><div className="n">{relatorioEntregasBreakdown.atraso}</div><div className="l">em atraso</div></div>
+                  </div>
+                )}
+
+                <div className="filter-menu-row" style={{ marginTop: 18, maxWidth: 420 }}>
+                  <div className="filter-menu-field">
+                    <label>Cliente</label>
+                    <select value={relatorioDemandaClienteFiltro} onChange={(e) => setRelatorioDemandaClienteFiltro(e.target.value)}>
+                      <option value="">Todos os clientes</option>
+                      {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                    </select>
+                  </div>
+                  <div className="filter-menu-field">
+                    <label>Tipo de produção</label>
+                    <select value={relatorioDemandaTipoFiltro} onChange={(e) => setRelatorioDemandaTipoFiltro(e.target.value)}>
+                      <option value="">Todos os tipos</option>
+                      {tiposProducao.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {relatorioDemandaFiltroCount !== null && (
+                  <div className="stats-row" style={{ marginTop: 12 }}>
+                    <div className="stat"><div className="n">{relatorioDemandaFiltroCount}</div><div className="l">demandas com esse filtro</div></div>
+                  </div>
+                )}
+              </ReportSection>
             </>
           ) : tab === "agenda" ? (
             !googleToken ? (
@@ -3873,6 +4185,67 @@ export default function App() {
                   <span className="config-card-title">Cores de status</span>
                   <span className="config-card-sub">Produção e Aprovação</span>
                 </button>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("metas")}>
+                  <Target size={20} />
+                  <span className="config-card-title">Metas</span>
+                  <span className="config-card-sub">Faturamento, anual e novos clientes</span>
+                </button>
+              </div>
+            ) : configSecaoAtiva === "metas" ? (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Metas</h3>
+                <p className="config-hint">Defina as metas que aparecem no painel Metas e nos Relatórios.</p>
+                <div className="month-nav" style={{ margin: "16px 0" }}>
+                  <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, -1))}><ChevronLeft size={14} /></button>
+                  <div className="month-nav-label">{mesLabel(monthAnchor)}</div>
+                  <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, 1))}><ChevronRight size={14} /></button>
+                  <button className="btn-ghost kanban-today-btn" onClick={() => setMonthAnchor(mesRef(todayISO()))}>Mês atual</button>
+                </div>
+                <div className="metas-grid">
+                  <div className="metas-card">
+                    <h4>Meta de faturamento — {mesLabel(monthAnchor)}</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        placeholder="Ex: 15000"
+                        value={metaInputValue}
+                        onChange={(e) => setMetaInputValue(e.target.value)}
+                      />
+                      <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => setMetaDoMes(monthAnchor, metaInputValue)}>Salvar</button>
+                    </div>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Faturamento anual — {anoAtual}</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        placeholder="Ex: 180000"
+                        value={metaAnualInputValue}
+                        onChange={(e) => setMetaAnualInputValue(e.target.value)}
+                      />
+                      <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => setMetaAnual(anoAtual, metaAnualInputValue)}>Salvar</button>
+                    </div>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Novos clientes — {mesLabel(monthAnchor)}</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="Ex: 3"
+                        value={metaClientesInputValue}
+                        onChange={(e) => setMetaClientesInputValue(e.target.value)}
+                      />
+                      <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => setMetaClientesDoMes(monthAnchor, metaClientesInputValue)}>Salvar</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : configSecaoAtiva === "tipos" ? (
               <div className="config-panel">
@@ -4246,12 +4619,22 @@ export default function App() {
               <div className="field">
                 <label>Status produção</label>
                 <select value={demandForm.statusProducao} onChange={(e) => setDemandForm({ ...demandForm, statusProducao: e.target.value })}>
-                  {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {STATUS_PRODUCAO.filter((s) => s !== "Finalizada" || s === demandForm.statusProducao).map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div className="field">
                 <label>Status aprovação</label>
-                <select value={demandForm.statusAprovacao} onChange={(e) => setDemandForm({ ...demandForm, statusAprovacao: e.target.value })}>
+                <select
+                  value={demandForm.statusAprovacao}
+                  onChange={(e) => {
+                    const novoValor = e.target.value;
+                    setDemandForm({
+                      ...demandForm,
+                      statusAprovacao: novoValor,
+                      statusProducao: novoValor === "Aprovado" ? "Finalizada" : demandForm.statusProducao,
+                    });
+                  }}
+                >
                   {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
@@ -4381,9 +4764,14 @@ export default function App() {
               <input value={clientForm.driveLink} onChange={(e) => setClientForm({ ...clientForm, driveLink: e.target.value })} placeholder="https://drive.google.com/…" />
             </div>
             <div className="field">
-              <label>Imagem de capa (URL — usada na visualização em grade)</label>
-              <input value={clientForm.capaUrl} onChange={(e) => setClientForm({ ...clientForm, capaUrl: e.target.value })} placeholder="https://…/logo-ou-foto.jpg" />
-              {clientForm.capaUrl && (
+              <label>Imagem de capa (usada na visualização em grade)</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleCapaClienteUpload(e.target.files?.[0] || null)}
+              />
+              {capaUploading && <div className="lock-note" style={{ marginTop: 8 }}>Enviando imagem…</div>}
+              {clientForm.capaUrl && !capaUploading && (
                 <div className="capa-preview" style={{ backgroundImage: `url(${clientForm.capaUrl})` }} />
               )}
             </div>
@@ -4487,7 +4875,7 @@ export default function App() {
             {transacaoForm.tipo === "Despesa" && (
               <div className="field" style={{ position: "relative" }}>
                 <label>Tags</label>
-                <div className="tag-cell" style={{ minHeight: 34 }}>
+                <div className="tag-cell">
                   <button type="button" className="tag-cell-btn" onClick={(e) => { e.stopPropagation(); setTagPopoverFor(tagPopoverFor === "form" ? null : "form"); }}>
                     {(transacaoForm.tags || []).length === 0 ? (
                       <span className="tag-cell-empty">+ adicionar tag</span>
