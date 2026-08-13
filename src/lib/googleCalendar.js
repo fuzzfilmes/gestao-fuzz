@@ -31,7 +31,7 @@ export async function requestGoogleToken(clientId) {
   return new Promise((resolve, reject) => {
     tokenClient.callback = (resp) => {
       if (resp.error) reject(new Error(resp.error_description || resp.error));
-      else resolve(resp.access_token);
+      else resolve({ accessToken: resp.access_token, expiresIn: Number(resp.expires_in) || 3600 });
     };
     tokenClient.error_callback = (err) => reject(new Error(err?.message || "Falha ao autenticar com o Google."));
     tokenClient.requestAccessToken({ prompt: "" });

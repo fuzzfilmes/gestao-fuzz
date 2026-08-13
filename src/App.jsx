@@ -312,7 +312,9 @@ function todayISO() {
 function getUrgencia(d) {
   if (d.statusProducao === "Finalizada") return { label: "Concluído", tone: "done" };
   if (d.statusProducao === "StandBy") return { label: "StandBy", tone: "standby" };
-  if (d.statusAprovacao === "Aguardando") return { label: "Aguardando cliente", tone: "wait" };
+  const itens = d.itens || [];
+  const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.statusEnvio === "Enviado" && v.statusAprovacao === "Aguardando");
+  if (d.statusAprovacao === "Aguardando" || todosVideosAguardandoCliente) return { label: "Aguardando cliente", tone: "wait" };
   if (!d.dataEntrega) return { label: "Sem prazo", tone: "neutral" };
   const today = new Date(todayISO() + "T00:00:00");
   const entrega = new Date(d.dataEntrega + "T00:00:00");
@@ -320,15 +322,6 @@ function getUrgencia(d) {
   if (diff < 0) return { label: "Atrasado", tone: "late" };
   if (diff <= 3) return { label: "Urgente", tone: "urgent" };
   return { label: "No prazo", tone: "ok" };
-}
-
-function getRetencao(d) {
-  if (!d.dataAprovacao) return { label: "Aguardando aprovação", ready: false };
-  const dt = new Date(d.dataAprovacao + "T00:00:00");
-  dt.setDate(dt.getDate() + RETENCAO_DIAS);
-  const today = new Date(todayISO() + "T00:00:00");
-  const ready = dt <= today;
-  return { label: fmtDate(dt.toISOString().slice(0, 10)), ready };
 }
 
 const TONE_CLASS = {
@@ -1109,6 +1102,36 @@ function KanbanBoard({ tasks, clients, onAdd, onToggle, onDelete, onMove, onUpda
   );
 }
 
+const GOOGLE_TOKEN_STORAGE_KEY = "fuzz_google_token";
+
+function loadStoredGoogleToken() {
+  try {
+    const raw = sessionStorage.getItem(GOOGLE_TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.accessToken || !parsed.expiresAt || parsed.expiresAt <= Date.now()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredGoogleToken(accessToken, expiresAt) {
+  try {
+    sessionStorage.setItem(GOOGLE_TOKEN_STORAGE_KEY, JSON.stringify({ accessToken, expiresAt }));
+  } catch {
+    // sessionStorage indisponível (ex: modo privado) — segue só em memória
+  }
+}
+
+function clearStoredGoogleToken() {
+  try {
+    sessionStorage.removeItem(GOOGLE_TOKEN_STORAGE_KEY);
+  } catch {
+    // ignora
+  }
+}
+
 export default function App() {
   const [tab, setTab] = useState("inicio");
   const [loading, setLoading] = useState(true);
@@ -1132,6 +1155,8 @@ export default function App() {
   const [demandDataInicio, setDemandDataInicio] = useState("");
   const [demandDataFim, setDemandDataFim] = useState("");
   const [draggedDemandId, setDraggedDemandId] = useState(null);
+  const [demandSortKey, setDemandSortKey] = useState(null);
+  const [demandSortDir, setDemandSortDir] = useState("asc");
   const [proposalClienteFilter, setProposalClienteFilter] = useState("");
   const [proposalStatusFilter, setProposalStatusFilter] = useState("");
   const [proposalValorSort, setProposalValorSort] = useState(null);
@@ -1211,8 +1236,8 @@ export default function App() {
   const [processoFiltroCategoria, setProcessoFiltroCategoria] = useState("");
   const processoPreviewUrls = useRef(new Map());
   const processoFileInputRef = useRef(null);
-  const [googleToken, setGoogleToken] = useState(null);
-  const [googleCalendarId, setGoogleCalendarId] = useState("");
+  const [googleToken, setGoogleToken] = useState(() => loadStoredGoogleToken()?.accessToken || null);
+  const [googleCalendarId, setGoogleCalendarId] = useState(() => (loadStoredGoogleToken() ? "primary" : ""));
   const [googleConectando, setGoogleConectando] = useState(false);
   const [googleErro, setGoogleErro] = useState("");
   const [googleEventosHoje, setGoogleEventosHoje] = useState([]);
@@ -1765,7 +1790,10 @@ export default function App() {
     const list = demandsRef.current.map((d) => {
       if (d.id !== demandId) return d;
       const atualizado = { ...d, [field]: value };
-      if (field === "statusAprovacao" && value === "Aprovado") atualizado.statusProducao = "Finalizada";
+      if (field === "statusAprovacao" && value === "Aprovado") {
+        atualizado.statusProducao = "Finalizada";
+        atualizado.dataAprovacao = atualizado.dataAprovacao || todayISO();
+      }
       return atualizado;
     });
     persistDemands(list);
@@ -1828,6 +1856,17 @@ export default function App() {
     atual.splice(toIdx, 0, moved);
     const renumerado = atual.map((d, i) => ({ ...d, ordem: i * 10 }));
     persistDemands(renumerado);
+  }
+
+  function toggleDemandSort(key) {
+    if (demandSortKey !== key) {
+      setDemandSortKey(key);
+      setDemandSortDir("asc");
+    } else if (demandSortDir === "asc") {
+      setDemandSortDir("desc");
+    } else {
+      setDemandSortKey(null);
+    }
   }
 
   function saveClient(c) {
@@ -2041,8 +2080,10 @@ export default function App() {
     try {
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
       if (!clientId) throw new Error("Integração com Google Agenda não configurada (falta VITE_GOOGLE_CLIENT_ID).");
-      const token = await googleCal.requestGoogleToken(clientId);
-      setGoogleToken(token);
+      const { accessToken, expiresIn } = await googleCal.requestGoogleToken(clientId);
+      const expiresAt = Date.now() + expiresIn * 1000 - 60000;
+      saveStoredGoogleToken(accessToken, expiresAt);
+      setGoogleToken(accessToken);
       setGoogleCalendarId("primary");
     } catch (e) {
       console.error("Falha ao conectar Google Agenda", e);
@@ -2053,8 +2094,9 @@ export default function App() {
   }
 
   function reconectarGoogleAgenda() {
+    clearStoredGoogleToken();
     setGoogleToken(null);
-    conectarGoogleAgenda();
+    setGoogleErro("Sua sessão do Google Agenda expirou. Clique em \"Conectar Google Agenda\" para continuar.");
   }
 
   useEffect(() => {
@@ -2070,7 +2112,10 @@ export default function App() {
     googleCal
       .listEvents(googleToken, googleCalendarId, timeMin, timeMax)
       .then((items) => { if (ativo) setGoogleEventosHoje(items); })
-      .catch((e) => console.error("Falha ao carregar compromissos de hoje", e))
+      .catch((e) => {
+        console.error("Falha ao carregar compromissos de hoje", e);
+        if (ativo && e.status === 401) reconectarGoogleAgenda();
+      })
       .finally(() => { if (ativo) setGoogleEventosHojeCarregando(false); });
     return () => { ativo = false; };
   }, [googleToken, googleCalendarId]);
@@ -2078,20 +2123,34 @@ export default function App() {
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
 
   const filteredDemands = useMemo(() => {
-    return demands
-      .filter((d) => {
-        if (!mostrarFinalizadas && d.statusProducao === "Finalizada") return false;
-        if (filterCliente && d.clienteId !== filterCliente) return false;
-        if (demandTipoFilter && d.tipo !== demandTipoFilter) return false;
-        if (demandStatusProducaoFilter && d.statusProducao !== demandStatusProducaoFilter) return false;
-        if (demandStatusAprovacaoFilter && d.statusAprovacao !== demandStatusAprovacaoFilter) return false;
-        if (demandDataInicio && (!d.dataEntrega || d.dataEntrega < demandDataInicio)) return false;
-        if (demandDataFim && (!d.dataEntrega || d.dataEntrega > demandDataFim)) return false;
-        if (search && !d.projeto.toLowerCase().includes(search.toLowerCase())) return false;
-        return true;
-      })
-      .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
-  }, [demands, filterCliente, demandTipoFilter, demandStatusProducaoFilter, demandStatusAprovacaoFilter, demandDataInicio, demandDataFim, search, mostrarFinalizadas]);
+    const list = demands.filter((d) => {
+      if (!mostrarFinalizadas && d.statusProducao === "Finalizada") return false;
+      if (filterCliente && d.clienteId !== filterCliente) return false;
+      if (demandTipoFilter && d.tipo !== demandTipoFilter) return false;
+      if (demandStatusProducaoFilter && d.statusProducao !== demandStatusProducaoFilter) return false;
+      if (demandStatusAprovacaoFilter && d.statusAprovacao !== demandStatusAprovacaoFilter) return false;
+      if (demandDataInicio && (!d.dataEntrega || d.dataEntrega < demandDataInicio)) return false;
+      if (demandDataFim && (!d.dataEntrega || d.dataEntrega > demandDataFim)) return false;
+      if (search && !d.projeto.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+    if (!demandSortKey) {
+      return list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+    }
+    const getValor = (d) => {
+      switch (demandSortKey) {
+        case "projeto": return d.projeto || "";
+        case "cliente": return clientName(d.clienteId);
+        case "producao": return d.statusProducao || "";
+        case "aprovacao": return d.statusAprovacao || "";
+        case "urgencia": return getUrgencia(d).label;
+        case "entrega": return d.dataEntrega || "";
+        default: return "";
+      }
+    };
+    const dir = demandSortDir === "asc" ? 1 : -1;
+    return list.sort((a, b) => getValor(a).localeCompare(getValor(b), "pt-BR", { numeric: true }) * dir);
+  }, [demands, filterCliente, demandTipoFilter, demandStatusProducaoFilter, demandStatusAprovacaoFilter, demandDataInicio, demandDataFim, search, mostrarFinalizadas, demandSortKey, demandSortDir]);
 
   const filteredProposals = useMemo(() => {
     let list = proposals.filter((p) => {
@@ -2127,14 +2186,19 @@ export default function App() {
     return { total: relatorioPropostasDoMes.length, pendentes, confirmadas, recusadas, taxaConversao, valorConfirmado };
   }, [relatorioPropostasDoMes]);
 
-  const relatorioDemandasDoMes = useMemo(
-    () => demands.filter((d) => mesRef(d.dataEntrega) === relatorioMes),
-    [demands, relatorioMes]
-  );
+  const relatorioDemandasDoMes = useMemo(() => {
+    const set = new Set();
+    demands.forEach((d) => {
+      const prazoNoMes = mesRef(d.dataEntrega) === relatorioMes;
+      const entregueNoMes = d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === relatorioMes;
+      if (prazoNoMes || entregueNoMes) set.add(d);
+    });
+    return Array.from(set);
+  }, [demands, relatorioMes]);
 
   const relatorioEntregasDoMes = useMemo(
-    () => relatorioDemandasDoMes.filter((d) => d.statusProducao === "Finalizada"),
-    [relatorioDemandasDoMes]
+    () => relatorioDemandasDoMes.filter((d) => d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === relatorioMes),
+    [relatorioDemandasDoMes, relatorioMes]
   );
 
   const relatorioEntregasBreakdown = useMemo(() => {
@@ -2158,14 +2222,19 @@ export default function App() {
   const stats = useMemo(() => {
     const atrasado = demands.filter((d) => getUrgencia(d).tone === "late").length;
     const aguardando = demands.filter((d) => getUrgencia(d).tone === "wait").length;
-    const prontoExcluir = demands.filter((d) => getRetencao(d).ready).length;
-    return { total: demands.length, atrasado, aguardando, prontoExcluir };
+    return { total: demands.length, atrasado, aguardando };
   }, [demands]);
 
   const demandasStatsMes = useMemo(() => {
-    const doMes = demands.filter((d) => mesRef(d.dataEntrega) === monthAnchor);
-    const finalizadas = doMes.filter((d) => d.statusProducao === "Finalizada").length;
-    return { total: doMes.length, finalizadas };
+    const doMes = new Set();
+    let finalizadas = 0;
+    demands.forEach((d) => {
+      const prazoNoMes = mesRef(d.dataEntrega) === monthAnchor;
+      const entregueNoMes = d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
+      if (prazoNoMes || entregueNoMes) doMes.add(d);
+      if (entregueNoMes) finalizadas += 1;
+    });
+    return { total: doMes.size, finalizadas };
   }, [demands, monthAnchor]);
 
   const proposalStats = useMemo(() => {
@@ -2220,12 +2289,22 @@ export default function App() {
         label: "Ver financeiro",
       });
     }
-    const contasAtrasadas = transacoes.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
-    if (contasAtrasadas.length > 0) {
+    const despesasAtrasadas = transacoes.filter((t) => t.tipo === "Despesa" && getStatusPagamentoEfetivo(t) === "Atrasado");
+    if (despesasAtrasadas.length > 0) {
       list.push({
-        id: "contas-atrasadas",
+        id: "despesas-atrasadas",
         tone: "late",
-        text: contasAtrasadas.length === 1 ? "1 conta está atrasada." : contasAtrasadas.length + " contas estão atrasadas.",
+        text: despesasAtrasadas.length === 1 ? "1 conta está atrasada." : despesasAtrasadas.length + " contas estão atrasadas.",
+        goto: "financeiro",
+        label: "Ver financeiro",
+      });
+    }
+    const receitasPendentes = transacoes.filter((t) => t.tipo === "Receita" && getStatusPagamentoEfetivo(t) === "Atrasado");
+    if (receitasPendentes.length > 0) {
+      list.push({
+        id: "receitas-pendentes",
+        tone: "late",
+        text: receitasPendentes.length === 1 ? "Um pagamento está pendente." : receitasPendentes.length + " pagamentos estão pendentes.",
         goto: "financeiro",
         label: "Ver financeiro",
       });
@@ -2897,6 +2976,8 @@ export default function App() {
         .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th { text-align: left; color: var(--text-dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+        .sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
+        .sortable-th:hover { color: var(--text); }
         td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
         tr:hover td { background: var(--surface-alt); }
         .proj { font-weight: 600; }
@@ -2927,6 +3008,8 @@ export default function App() {
         .demand-drag-handle { display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: grab; }
         .demand-drag-handle:active { cursor: grabbing; }
         .demand-drag-handle:hover { color: var(--text); }
+        .demand-drag-handle.disabled { color: var(--border); cursor: not-allowed; opacity: 0.5; }
+        .demand-drag-handle.disabled:hover { color: var(--border); }
         .empty { text-align: center; padding: 50px 0; color: var(--text-dim); }
         .overlay { position: fixed; inset: 0; background: rgba(10,8,16,0.65); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
         .modal { background: rgba(29, 32, 37, 0.92); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; width: 480px; max-width: 100%; max-height: 90vh; overflow-y: auto; padding: 24px; box-shadow: 0 30px 70px rgba(0,0,0,0.5); }
@@ -3131,7 +3214,6 @@ export default function App() {
                       <div className="stat"><div className="n">{stats.total}</div><div className="l">demandas</div></div>
                       <div className="stat warn"><div className="n">{stats.atrasado}</div><div className="l">atrasadas</div></div>
                       <div className="stat wait"><div className="n">{stats.aguardando}</div><div className="l">aguard. cliente</div></div>
-                      <div className="stat ready"><div className="n">{stats.prontoExcluir}</div><div className="l">liberadas p/ excluir</div></div>
                     </div>
                   ),
                 },
@@ -3327,12 +3409,24 @@ export default function App() {
                     <tr>
                       <th style={{ width: 22 }}></th>
                       <th style={{ width: 30 }}></th>
-                      <th>Projeto</th>
-                      <th>Cliente</th>
-                      <th>Produção</th>
-                      <th>Aprovação</th>
-                      <th>Urgência</th>
-                      <th>Entrega</th>
+                      <th className="sortable-th" onClick={() => toggleDemandSort("projeto")}>
+                        Projeto {demandSortKey === "projeto" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      </th>
+                      <th className="sortable-th" onClick={() => toggleDemandSort("cliente")}>
+                        Cliente {demandSortKey === "cliente" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      </th>
+                      <th className="sortable-th" onClick={() => toggleDemandSort("producao")}>
+                        Produção {demandSortKey === "producao" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      </th>
+                      <th className="sortable-th" onClick={() => toggleDemandSort("aprovacao")}>
+                        Aprovação {demandSortKey === "aprovacao" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      </th>
+                      <th className="sortable-th" onClick={() => toggleDemandSort("urgencia")}>
+                        Urgência {demandSortKey === "urgencia" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      </th>
+                      <th className="sortable-th" onClick={() => toggleDemandSort("entrega")}>
+                        Entrega {demandSortKey === "entrega" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      </th>
                       <th></th>
                     </tr>
                   </thead>
@@ -3346,16 +3440,16 @@ export default function App() {
                           <tr
                             className={prog ? "clickable-row" : ""}
                             onClick={() => prog && toggleExpandDemand(d.id)}
-                            onDragOver={(e) => { if (draggedDemandId) e.preventDefault(); }}
-                            onDrop={(e) => { e.preventDefault(); if (draggedDemandId) { reordenarDemandas(draggedDemandId, d.id); setDraggedDemandId(null); } }}
+                            onDragOver={(e) => { if (!demandSortKey && draggedDemandId) e.preventDefault(); }}
+                            onDrop={(e) => { e.preventDefault(); if (!demandSortKey && draggedDemandId) { reordenarDemandas(draggedDemandId, d.id); setDraggedDemandId(null); } }}
                           >
                             <td onClick={(e) => e.stopPropagation()}>
                               <span
-                                className="demand-drag-handle"
-                                draggable
-                                onDragStart={() => setDraggedDemandId(d.id)}
+                                className={"demand-drag-handle" + (demandSortKey ? " disabled" : "")}
+                                draggable={!demandSortKey}
+                                onDragStart={() => !demandSortKey && setDraggedDemandId(d.id)}
                                 onDragEnd={() => setDraggedDemandId(null)}
-                                title="Arrastar para reordenar"
+                                title={demandSortKey ? "Limpe a ordenação por coluna pra arrastar" : "Arrastar para reordenar"}
                               >
                                 <GripVertical size={14} />
                               </span>
@@ -4632,6 +4726,7 @@ export default function App() {
                       ...demandForm,
                       statusAprovacao: novoValor,
                       statusProducao: novoValor === "Aprovado" ? "Finalizada" : demandForm.statusProducao,
+                      dataAprovacao: novoValor === "Aprovado" ? demandForm.dataAprovacao || todayISO() : demandForm.dataAprovacao,
                     });
                   }}
                 >
