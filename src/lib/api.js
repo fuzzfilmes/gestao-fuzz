@@ -220,7 +220,7 @@ function kanbanToRow(t) {
   return {
     id: t.id,
     titulo: t.titulo || "",
-    data: t.data,
+    data: n(t.data),
     concluida: !!t.concluida,
     cliente_id: n(t.clienteId),
     notas: t.notas || "",
@@ -230,7 +230,7 @@ function kanbanFromRow(r) {
   return {
     id: r.id,
     titulo: r.titulo,
-    data: r.data,
+    data: r.data || "",
     concluida: r.concluida,
     clienteId: r.cliente_id || "",
     notas: r.notas,

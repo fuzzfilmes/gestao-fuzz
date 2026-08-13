@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -989,6 +989,70 @@ function KanbanBoard({ tasks, clients, onAdd, onToggle, onDelete, onMove, onUpda
         <button className="btn-ghost kanban-today-btn" onClick={() => setWeekAnchor(today)}>Hoje</button>
       </div>
       <div className="kanban-board">
+        {(() => {
+          const notasNaoDirecionadas = tasks.filter((t) => !t.data);
+          return (
+            <div
+              className={"kanban-col inbox" + (dragOverDay === "" ? " drag-over" : "")}
+              onDragOver={(e) => { e.preventDefault(); setDragOverDay(""); }}
+              onDragLeave={() => setDragOverDay((d) => (d === "" ? null : d))}
+              onDrop={(e) => handleDrop(e, "")}
+            >
+              <div className="kanban-col-header">
+                <span className="kanban-col-day">Notas rápidas</span>
+                <span className="kanban-col-date">a direcionar</span>
+              </div>
+              <div className="kanban-col-body">
+                {notasNaoDirecionadas.map((t) => (
+                  <div
+                    key={t.id}
+                    className={"kanban-card" + (t.concluida ? " done" : "")}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)}
+                    onClick={() => openDetail(t)}
+                  >
+                    <GripVertical size={12} className="kanban-card-grip" onClick={(e) => e.stopPropagation()} />
+                    <input
+                      type="checkbox"
+                      checked={t.concluida}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => onToggle(t.id)}
+                    />
+                    <span className="kanban-card-title">
+                      {t.titulo}
+                      {t.notas && <FileText size={11} className="kanban-card-note-icon" />}
+                    </span>
+                    <button
+                      className="kanban-card-del"
+                      onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                {addingDay === "" ? (
+                  <div className="kanban-add-form">
+                    <input
+                      autoFocus
+                      value={draftTitle}
+                      onChange={(e) => setDraftTitle(e.target.value)}
+                      placeholder="Nova nota…"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") confirmAdd("");
+                        if (e.key === "Escape") { setAddingDay(null); setDraftTitle(""); }
+                      }}
+                      onBlur={() => confirmAdd("")}
+                    />
+                  </div>
+                ) : (
+                  <button className="kanban-add-btn" onClick={() => { setAddingDay(""); setDraftTitle(""); }}>
+                    <Plus size={12} /> adicionar
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         {weekDates.map((date, i) => {
           const dayTasks = tasks.filter((t) => t.data === date);
           const isToday = date === today;
@@ -1143,6 +1207,7 @@ export default function App() {
   const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
   const [coresStatus, setCoresStatus] = useState({});
   const [kanbanTasks, setKanbanTasks] = useState([]);
+  const [quickNoteInput, setQuickNoteInput] = useState("");
   const [demandForm, setDemandForm] = useState(null);
   const [clientForm, setClientForm] = useState(null);
   const [capaUploading, setCapaUploading] = useState(false);
@@ -1752,6 +1817,11 @@ export default function App() {
     if (!limpo) return;
     const nova = { id: "k_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), titulo: limpo, data, concluida: false, clienteId: "", notas: "" };
     persistKanbanTasks([...kanbanTasks, nova]);
+  }
+
+  function handleAddQuickNote() {
+    addKanbanTask("", quickNoteInput);
+    setQuickNoteInput("");
   }
 
   function updateKanbanTask(id, fields) {
@@ -2503,6 +2573,11 @@ export default function App() {
     return { entregas, pagamentos, kanbanHoje };
   }, [demands, transacoes, kanbanTasks]);
 
+  const notasRapidasPendentes = useMemo(
+    () => kanbanTasks.filter((k) => !k.data && !k.concluida),
+    [kanbanTasks]
+  );
+
   const filteredTransacoes = useMemo(() => {
     let list = transacoes.filter((t) => mesRef(t.data) === monthAnchor || (!t.data && financeFilter === "todos"));
     if (financeFilter === "receitas") list = list.filter((t) => t.tipo === "Receita");
@@ -2764,9 +2839,11 @@ export default function App() {
         .gauge-sublabel { fill: var(--text-dim); font-size: 9px; }
         .gauge-label { font-size: 11.5px; color: var(--text-dim); text-align: center; }
         .metas-line b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
-        .kanban-board { display: grid; grid-template-columns: repeat(7, minmax(190px, 1fr)); gap: 10px; overflow-x: auto; }
+        .kanban-board { display: grid; grid-template-columns: repeat(8, minmax(190px, 1fr)); gap: 10px; overflow-x: auto; }
         .kanban-col { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; min-height: 220px; display: flex; flex-direction: column; transition: background 0.15s, border-color 0.15s; }
         .kanban-col.today { border-color: var(--brand); }
+        .kanban-col.inbox { border-color: var(--amber); border-style: dashed; }
+        .kanban-col.inbox .kanban-col-day { color: var(--amber); }
         .kanban-col.drag-over { background: var(--brand-dark); }
         .kanban-col-header { padding: 10px 10px 8px 10px; border-bottom: 1px solid var(--border); }
         .kanban-col-day { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); }
@@ -2892,6 +2969,10 @@ export default function App() {
           letter-spacing: 0.4px; margin: 0 0 10px 0; color: var(--text-dim);
         }
         .home-card-empty { color: var(--text-dim); font-size: 12.5px; padding: 4px 0; }
+        .home-quicknote-row { display: flex; gap: 8px; margin-bottom: 6px; }
+        .home-quicknote-row input { flex: 1; }
+        .home-quicknote-row .icon-btn { flex-shrink: 0; }
+        .home-quicknote-row .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .home-row { display: flex; align-items: center; gap: 9px; padding: 8px 4px; border-top: 1px solid var(--border); cursor: pointer; }
         .home-row:first-of-type { border-top: none; }
         .home-row:hover { background: rgba(255,255,255,0.04); border-radius: 6px; }
@@ -3326,6 +3407,30 @@ export default function App() {
                           />
                           <span className="home-row-title" onClick={() => setTab("kanban")}>{k.titulo}</span>
                           <span className="home-row-sub">{clientName(k.clienteId)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="home-card">
+                    <h4><StickyNote size={14} /> Nota rápida</h4>
+                    <div className="home-quicknote-row">
+                      <input
+                        value={quickNoteInput}
+                        onChange={(e) => setQuickNoteInput(e.target.value)}
+                        placeholder="Anotar algo pra direcionar depois…"
+                        onKeyDown={(e) => { if (e.key === "Enter") handleAddQuickNote(); }}
+                      />
+                      <button className="icon-btn" onClick={handleAddQuickNote} disabled={!quickNoteInput.trim()}>
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    {notasRapidasPendentes.length === 0 ? (
+                      <div className="home-card-empty">Nenhuma nota pendente de direcionamento.</div>
+                    ) : (
+                      notasRapidasPendentes.map((n) => (
+                        <div key={n.id} className="home-row" onClick={() => setTab("kanban")}>
+                          <span className="home-row-dot tone-wait" />
+                          <span className="home-row-title">{n.titulo}</span>
                         </div>
                       ))
                     )}
