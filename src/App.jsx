@@ -341,6 +341,10 @@ function videoProgress(d) {
   return { done, total: itens.length };
 }
 
+function demandaPeso(d) {
+  return d.itens && d.itens.length > 0 ? d.itens.length : 1;
+}
+
 const FOLLOWUP_DIAS = 7;
 
 function diasDesde(dataISO) {
@@ -988,71 +992,64 @@ function KanbanBoard({ tasks, clients, onAdd, onToggle, onDelete, onMove, onUpda
         <button className="icon-btn" onClick={() => setWeekAnchor(addDaysISO(sunday, 7))}><ChevronRight size={14} /></button>
         <button className="btn-ghost kanban-today-btn" onClick={() => setWeekAnchor(today)}>Hoje</button>
       </div>
-      <div className="kanban-board">
-        {(() => {
-          const notasNaoDirecionadas = tasks.filter((t) => !t.data);
-          return (
-            <div
-              className={"kanban-col inbox" + (dragOverDay === "" ? " drag-over" : "")}
-              onDragOver={(e) => { e.preventDefault(); setDragOverDay(""); }}
-              onDragLeave={() => setDragOverDay((d) => (d === "" ? null : d))}
-              onDrop={(e) => handleDrop(e, "")}
-            >
-              <div className="kanban-col-header">
-                <span className="kanban-col-day">Notas rápidas</span>
-                <span className="kanban-col-date">a direcionar</span>
-              </div>
-              <div className="kanban-col-body">
-                {notasNaoDirecionadas.map((t) => (
-                  <div
-                    key={t.id}
-                    className={"kanban-card" + (t.concluida ? " done" : "")}
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)}
-                    onClick={() => openDetail(t)}
+      {(() => {
+        const notasNaoDirecionadas = tasks.filter((t) => !t.data);
+        return (
+          <div
+            className={"kanban-inbox-bar" + (dragOverDay === "" ? " drag-over" : "")}
+            onDragOver={(e) => { e.preventDefault(); setDragOverDay(""); }}
+            onDragLeave={() => setDragOverDay((d) => (d === "" ? null : d))}
+            onDrop={(e) => handleDrop(e, "")}
+          >
+            <span className="kanban-inbox-label"><StickyNote size={13} /> Notas rápidas</span>
+            <div className="kanban-inbox-chips">
+              {notasNaoDirecionadas.map((t) => (
+                <div
+                  key={t.id}
+                  className={"kanban-chip" + (t.concluida ? " done" : "")}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)}
+                  onClick={() => openDetail(t)}
+                >
+                  <GripVertical size={11} className="kanban-chip-grip" onClick={(e) => e.stopPropagation()} />
+                  <input
+                    type="checkbox"
+                    checked={t.concluida}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => onToggle(t.id)}
+                  />
+                  <span className="kanban-chip-title">{t.titulo}</span>
+                  <button
+                    className="kanban-chip-del"
+                    onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
                   >
-                    <GripVertical size={12} className="kanban-card-grip" onClick={(e) => e.stopPropagation()} />
-                    <input
-                      type="checkbox"
-                      checked={t.concluida}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => onToggle(t.id)}
-                    />
-                    <span className="kanban-card-title">
-                      {t.titulo}
-                      {t.notas && <FileText size={11} className="kanban-card-note-icon" />}
-                    </span>
-                    <button
-                      className="kanban-card-del"
-                      onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-                {addingDay === "" ? (
-                  <div className="kanban-add-form">
-                    <input
-                      autoFocus
-                      value={draftTitle}
-                      onChange={(e) => setDraftTitle(e.target.value)}
-                      placeholder="Nova nota…"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") confirmAdd("");
-                        if (e.key === "Escape") { setAddingDay(null); setDraftTitle(""); }
-                      }}
-                      onBlur={() => confirmAdd("")}
-                    />
-                  </div>
-                ) : (
-                  <button className="kanban-add-btn" onClick={() => { setAddingDay(""); setDraftTitle(""); }}>
-                    <Plus size={12} /> adicionar
+                    <X size={11} />
                   </button>
-                )}
-              </div>
+                </div>
+              ))}
+              {addingDay === "" ? (
+                <input
+                  className="kanban-inbox-input"
+                  autoFocus
+                  value={draftTitle}
+                  onChange={(e) => setDraftTitle(e.target.value)}
+                  placeholder="Nova nota…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") confirmAdd("");
+                    if (e.key === "Escape") { setAddingDay(null); setDraftTitle(""); }
+                  }}
+                  onBlur={() => confirmAdd("")}
+                />
+              ) : (
+                <button className="kanban-chip-add" onClick={() => { setAddingDay(""); setDraftTitle(""); }}>
+                  <Plus size={12} /> nota
+                </button>
+              )}
             </div>
-          );
-        })()}
+          </div>
+        );
+      })()}
+      <div className="kanban-board">
         {weekDates.map((date, i) => {
           const dayTasks = tasks.filter((t) => t.data === date);
           const isToday = date === today;
@@ -1223,9 +1220,9 @@ export default function App() {
   const [demandSortKey, setDemandSortKey] = useState(null);
   const [demandSortDir, setDemandSortDir] = useState("asc");
   const [proposalClienteFilter, setProposalClienteFilter] = useState("");
-  const [proposalStatusFilter, setProposalStatusFilter] = useState("");
+  const [proposalStatusFilter, setProposalStatusFilter] = useState("Pendente");
   const [proposalValorSort, setProposalValorSort] = useState(null);
-  const [clientView, setClientView] = useState("lista");
+  const [clientView, setClientView] = useState("grade");
   const [clientViewInfo, setClientViewInfo] = useState(null);
   const [clientArquivos, setClientArquivos] = useState([]);
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
@@ -2290,9 +2287,11 @@ export default function App() {
   }, [relatorioDemandasDoMes, relatorioDemandaClienteFiltro, relatorioDemandaTipoFiltro]);
 
   const stats = useMemo(() => {
-    const atrasado = demands.filter((d) => getUrgencia(d).tone === "late").length;
-    const aguardando = demands.filter((d) => getUrgencia(d).tone === "wait").length;
-    return { total: demands.length, atrasado, aguardando };
+    const somar = (lista) => lista.reduce((s, d) => s + demandaPeso(d), 0);
+    const emAndamento = somar(demands.filter((d) => d.statusProducao === "Em andamento"));
+    const atrasado = somar(demands.filter((d) => getUrgencia(d).tone === "late"));
+    const aguardando = somar(demands.filter((d) => getUrgencia(d).tone === "wait"));
+    return { emAndamento, atrasado, aguardando };
   }, [demands]);
 
   const demandasStatsMes = useMemo(() => {
@@ -2302,9 +2301,10 @@ export default function App() {
       const prazoNoMes = mesRef(d.dataEntrega) === monthAnchor;
       const entregueNoMes = d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
       if (prazoNoMes || entregueNoMes) doMes.add(d);
-      if (entregueNoMes) finalizadas += 1;
+      if (entregueNoMes) finalizadas += demandaPeso(d);
     });
-    return { total: doMes.size, finalizadas };
+    const total = Array.from(doMes).reduce((s, d) => s + demandaPeso(d), 0);
+    return { total, finalizadas };
   }, [demands, monthAnchor]);
 
   const proposalStats = useMemo(() => {
@@ -2580,15 +2580,16 @@ export default function App() {
 
   const filteredTransacoes = useMemo(() => {
     let list = transacoes.filter((t) => mesRef(t.data) === monthAnchor || (!t.data && financeFilter === "todos"));
-    if (financeFilter === "receitas") list = list.filter((t) => t.tipo === "Receita");
-    else if (financeFilter === "despesas") list = list.filter((t) => t.tipo === "Despesa");
-    else if (financeFilter === "atrasadas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
+    if (financeFilter === "atrasadas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
     else if (financeFilter === "pagas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Pago");
     else if (financeFilter === "pendentes") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Pendente");
     if (tagFilterIds.length > 0) list = list.filter((t) => (t.tags || []).some((id) => tagFilterIds.includes(id)));
     if (financeClienteFilter) list = list.filter((t) => t.clienteId === financeClienteFilter);
     return list;
   }, [transacoes, financeFilter, monthAnchor, tagFilterIds, financeClienteFilter]);
+
+  const filteredReceitas = useMemo(() => filteredTransacoes.filter((t) => t.tipo === "Receita"), [filteredTransacoes]);
+  const filteredDespesas = useMemo(() => filteredTransacoes.filter((t) => t.tipo === "Despesa"), [filteredTransacoes]);
 
   return (
     <div className="app">
@@ -2839,11 +2840,37 @@ export default function App() {
         .gauge-sublabel { fill: var(--text-dim); font-size: 9px; }
         .gauge-label { font-size: 11.5px; color: var(--text-dim); text-align: center; }
         .metas-line b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
-        .kanban-board { display: grid; grid-template-columns: repeat(8, minmax(190px, 1fr)); gap: 10px; overflow-x: auto; }
+        .kanban-inbox-bar {
+          display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 14px;
+          background: rgba(217,164,65,0.06); border: 1px dashed var(--amber); border-radius: 12px;
+          overflow-x: auto; transition: background 0.15s;
+        }
+        .kanban-inbox-bar.drag-over { background: var(--amber-dark); }
+        .kanban-inbox-label { display: flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--amber); flex-shrink: 0; white-space: nowrap; }
+        .kanban-inbox-chips { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+        .kanban-chip {
+          display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: 20px; padding: 5px 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+        }
+        .kanban-chip:hover { border-color: var(--amber); }
+        .kanban-chip.done { opacity: 0.5; text-decoration: line-through; }
+        .kanban-chip-grip { color: var(--text-dim); cursor: grab; flex-shrink: 0; }
+        .kanban-chip input[type="checkbox"] { flex-shrink: 0; }
+        .kanban-chip-title { font-size: 12.5px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+        .kanban-chip-del { background: none; border: none; color: var(--text-dim); cursor: pointer; flex-shrink: 0; display: flex; padding: 0; }
+        .kanban-chip-del:hover { color: var(--red); }
+        .kanban-chip-add {
+          display: flex; align-items: center; gap: 4px; background: none; border: 1px dashed var(--border);
+          border-radius: 20px; padding: 5px 10px; color: var(--text-dim); cursor: pointer; font-size: 12px; flex-shrink: 0;
+        }
+        .kanban-chip-add:hover { border-color: var(--amber); color: var(--amber); }
+        .kanban-inbox-input {
+          background: var(--surface); border: 1px solid var(--amber); border-radius: 20px; padding: 5px 12px;
+          font-size: 12.5px; width: 180px; flex-shrink: 0;
+        }
+        .kanban-board { display: grid; grid-template-columns: repeat(7, minmax(190px, 1fr)); gap: 10px; overflow-x: auto; }
         .kanban-col { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; min-height: 220px; display: flex; flex-direction: column; transition: background 0.15s, border-color 0.15s; }
         .kanban-col.today { border-color: var(--brand); }
-        .kanban-col.inbox { border-color: var(--amber); border-style: dashed; }
-        .kanban-col.inbox .kanban-col-day { color: var(--amber); }
         .kanban-col.drag-over { background: var(--brand-dark); }
         .kanban-col-header { padding: 10px 10px 8px 10px; border-bottom: 1px solid var(--border); }
         .kanban-col-day { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); }
@@ -2870,6 +2897,9 @@ export default function App() {
 
         .config-panel { max-width: 480px; }
         .config-section-title { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+        .finance-panel { margin-bottom: 28px; }
+        .finance-panel-title { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+        .finance-panel-total { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text-dim); font-weight: 500; }
         .config-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 16px 0; }
         .config-tipo-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
         .config-tipo-item { display: flex; align-items: center; justify-content: space-between; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
@@ -3292,7 +3322,7 @@ export default function App() {
                   label: "Resultados de produção",
                   content: (
                     <div className="stats-row">
-                      <div className="stat"><div className="n">{stats.total}</div><div className="l">demandas</div></div>
+                      <div className="stat"><div className="n">{stats.emAndamento}</div><div className="l">em andamento</div></div>
                       <div className="stat warn"><div className="n">{stats.atrasado}</div><div className="l">atrasadas</div></div>
                       <div className="stat wait"><div className="n">{stats.aguardando}</div><div className="l">aguard. cliente</div></div>
                     </div>
@@ -3717,7 +3747,7 @@ export default function App() {
                       id="propostas"
                       openId={openFilterMenu}
                       setOpenId={setOpenFilterMenu}
-                      activeCount={[proposalClienteFilter, proposalStatusFilter].filter(Boolean).length}
+                      activeCount={(proposalClienteFilter ? 1 : 0) + (proposalStatusFilter !== "Pendente" ? 1 : 0)}
                     >
                       <div className="filter-menu-field">
                         <label>Cliente</label>
@@ -3729,14 +3759,14 @@ export default function App() {
                       <div className="filter-menu-field">
                         <label>Status</label>
                         <select value={proposalStatusFilter} onChange={(e) => setProposalStatusFilter(e.target.value)}>
-                          <option value="">Todos os status</option>
                           <option value="Pendente">Aguardando</option>
                           <option value="Confirmada">Aprovadas</option>
                           <option value="Recusada">Recusadas</option>
+                          <option value="">Todos os status</option>
                         </select>
                       </div>
-                      {(proposalClienteFilter || proposalStatusFilter) && (
-                        <button className="filter-menu-clear" onClick={() => { setProposalClienteFilter(""); setProposalStatusFilter(""); }}>
+                      {(proposalClienteFilter || proposalStatusFilter !== "Pendente") && (
+                        <button className="filter-menu-clear" onClick={() => { setProposalClienteFilter(""); setProposalStatusFilter("Pendente"); }}>
                           Limpar filtros
                         </button>
                       )}
@@ -3862,8 +3892,6 @@ export default function App() {
                     <label>Transações</label>
                     <select value={financeFilter} onChange={(e) => setFinanceFilter(e.target.value)}>
                       <option value="todos">Todas as transações</option>
-                      <option value="receitas">Só receitas</option>
-                      <option value="despesas">Só despesas</option>
                       <option value="atrasadas">Só atrasadas</option>
                       <option value="pagas">Só pagas</option>
                       <option value="pendentes">Só pendentes</option>
@@ -3937,46 +3965,107 @@ export default function App() {
                 </div>
               )}
 
-              {filteredTransacoes.length === 0 ? (
-                <div className="empty">Nenhuma transação neste mês. Receitas de propostas confirmadas aparecem automaticamente.</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Descrição</th>
-                      <th>Tipo</th>
-                      <th>Categoria</th>
-                      <th>Natureza</th>
-                      <th>Tags</th>
-                      <th>Cliente / Demanda</th>
-                      <th>Valor</th>
-                      <th>Vencimento</th>
-                      <th>Status</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredTransacoes.map((t) => {
-                      const statusEfetivo = getStatusPagamentoEfetivo(t);
-                      const demanda = demands.find((d) => d.id === t.demandaId);
-                      const tTags = (t.tags || []).map((id) => tags.find((tg) => tg.id === id)).filter(Boolean);
-                      return (
-                        <tr key={t.id}>
-                          <td className="proj">
-                            {t.descricao || "(sem descrição)"}
-                            {t.parcelaGrupoId && (
-                              <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>
-                                {t.parcelaAtual}/{t.parcelaTotal}
-                              </span>
-                            )}
-                          </td>
-                          <td>
-                            <span className={"badge " + (t.tipo === "Receita" ? "badge-ready" : "badge-late")}>{t.tipo}</span>
-                          </td>
-                          <td>{t.categoria}</td>
-                          <td>{t.tipo === "Despesa" ? (t.natureza || "Variável") : "—"}</td>
-                          <td>
-                            {t.tipo === "Despesa" ? (
+              <div className="finance-panel">
+                <h3 className="config-section-title finance-panel-title">
+                  <span>Receitas — {mesLabel(monthAnchor)}</span>
+                  <span className="finance-panel-total">R$ {filteredReceitas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                </h3>
+                {filteredReceitas.length === 0 ? (
+                  <div className="empty">Nenhuma receita neste mês. Receitas de propostas confirmadas aparecem automaticamente.</div>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Descrição</th>
+                        <th>Categoria</th>
+                        <th>Cliente / Demanda</th>
+                        <th>Valor</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReceitas.map((t) => {
+                        const statusEfetivo = getStatusPagamentoEfetivo(t);
+                        const demanda = demands.find((d) => d.id === t.demandaId);
+                        return (
+                          <tr key={t.id}>
+                            <td className="proj">
+                              {t.descricao || "(sem descrição)"}
+                              {t.parcelaGrupoId && (
+                                <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>
+                                  {t.parcelaAtual}/{t.parcelaTotal}
+                                </span>
+                              )}
+                            </td>
+                            <td>{t.categoria}</td>
+                            <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
+                            <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                            <td className="mono">{fmtDate(t.data)}</td>
+                            <td>
+                              <button
+                                className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
+                                onClick={() => toggleStatusPagamento(t)}
+                                title="Clique para alternar pago/pendente"
+                              >
+                                {statusEfetivo}
+                              </button>
+                            </td>
+                            <td>
+                              <div className="row-actions">
+                                <button className="icon-btn" onClick={() => setTransacaoForm(t)}><Pencil size={13} /></button>
+                                <button className="icon-btn" onClick={() => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId })}><Trash2 size={13} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="finance-panel">
+                <h3 className="config-section-title finance-panel-title">
+                  <span>Despesas — {mesLabel(monthAnchor)}</span>
+                  <span className="finance-panel-total">R$ {filteredDespesas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                </h3>
+                {filteredDespesas.length === 0 ? (
+                  <div className="empty">Nenhuma despesa neste mês.</div>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Descrição</th>
+                        <th>Categoria</th>
+                        <th>Natureza</th>
+                        <th>Tags</th>
+                        <th>Cliente / Demanda</th>
+                        <th>Valor</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDespesas.map((t) => {
+                        const statusEfetivo = getStatusPagamentoEfetivo(t);
+                        const demanda = demands.find((d) => d.id === t.demandaId);
+                        const tTags = (t.tags || []).map((id) => tags.find((tg) => tg.id === id)).filter(Boolean);
+                        return (
+                          <tr key={t.id}>
+                            <td className="proj">
+                              {t.descricao || "(sem descrição)"}
+                              {t.parcelaGrupoId && (
+                                <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>
+                                  {t.parcelaAtual}/{t.parcelaTotal}
+                                </span>
+                              )}
+                            </td>
+                            <td>{t.categoria}</td>
+                            <td>{t.natureza || "Variável"}</td>
+                            <td>
                               <div className="tag-cell">
                                 <button className="tag-cell-btn" onClick={(e) => { e.stopPropagation(); setTagPopoverFor(tagPopoverFor === t.id ? null : t.id); }}>
                                   {tTags.length === 0 ? (
@@ -4000,34 +4089,32 @@ export default function App() {
                                   />
                                 )}
                               </div>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
-                          <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                          <td className="mono">{fmtDate(t.data)}</td>
-                          <td>
-                            <button
-                              className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
-                              onClick={() => toggleStatusPagamento(t)}
-                              title="Clique para alternar pago/pendente"
-                            >
-                              {statusEfetivo}
-                            </button>
-                          </td>
-                          <td>
-                            <div className="row-actions">
-                              <button className="icon-btn" onClick={() => setTransacaoForm(t)}><Pencil size={13} /></button>
-                              <button className="icon-btn" onClick={() => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId })}><Trash2 size={13} /></button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
+                            </td>
+                            <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
+                            <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                            <td className="mono">{fmtDate(t.data)}</td>
+                            <td>
+                              <button
+                                className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
+                                onClick={() => toggleStatusPagamento(t)}
+                                title="Clique para alternar pago/pendente"
+                              >
+                                {statusEfetivo}
+                              </button>
+                            </td>
+                            <td>
+                              <div className="row-actions">
+                                <button className="icon-btn" onClick={() => setTransacaoForm(t)}><Pencil size={13} /></button>
+                                <button className="icon-btn" onClick={() => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId })}><Trash2 size={13} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </>
           ) : tab === "metas" ? (
             <>
