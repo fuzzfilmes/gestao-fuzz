@@ -1049,6 +1049,43 @@ function KanbanBoard({ tasks, clients, onAdd, onToggle, onDelete, onMove, onUpda
           </div>
         );
       })()}
+      {(() => {
+        const sundayAtual = sundayOfWeek(today);
+        const pendencias = tasks.filter((t) => !t.concluida && t.data && t.data < sundayAtual);
+        if (pendencias.length === 0) return null;
+        return (
+          <div className="kanban-inbox-bar pendencias">
+            <span className="kanban-inbox-label"><AlertTriangle size={13} /> Pendências</span>
+            <div className="kanban-inbox-chips">
+              {pendencias.map((t) => (
+                <div
+                  key={t.id}
+                  className="kanban-chip"
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)}
+                  onClick={() => openDetail(t)}
+                >
+                  <GripVertical size={11} className="kanban-chip-grip" onClick={(e) => e.stopPropagation()} />
+                  <input
+                    type="checkbox"
+                    checked={t.concluida}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => onToggle(t.id)}
+                  />
+                  <span className="kanban-chip-title">{t.titulo}</span>
+                  <span className="kanban-chip-date">{fmtDiaMes(t.data)}</span>
+                  <button
+                    className="kanban-chip-del"
+                    onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       <div className="kanban-board">
         {weekDates.map((date, i) => {
           const dayTasks = tasks.filter((t) => t.data === date);
@@ -1231,8 +1268,13 @@ export default function App() {
   const [relatorioEntregasAberto, setRelatorioEntregasAberto] = useState(false);
   const [relatorioDemandaClienteFiltro, setRelatorioDemandaClienteFiltro] = useState("");
   const [relatorioDemandaTipoFiltro, setRelatorioDemandaTipoFiltro] = useState("");
-  const [financeFilter, setFinanceFilter] = useState("todos");
+  const [financeStatusReceitaFilter, setFinanceStatusReceitaFilter] = useState("todos");
+  const [financeStatusDespesaFilter, setFinanceStatusDespesaFilter] = useState("todos");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
+  const [financeReceitasSortKey, setFinanceReceitasSortKey] = useState(null);
+  const [financeReceitasSortDir, setFinanceReceitasSortDir] = useState("asc");
+  const [financeDespesasSortKey, setFinanceDespesasSortKey] = useState(null);
+  const [financeDespesasSortDir, setFinanceDespesasSortDir] = useState("asc");
   const [monthAnchor, setMonthAnchor] = useState(mesRef(todayISO()));
   const [parcelasInput, setParcelasInput] = useState(1);
   const [metas, setMetas] = useState({});
@@ -1473,26 +1515,38 @@ export default function App() {
         clientId = novo.id;
         clientList = [novo, ...currentClients];
       }
-      persistClients(clientList);
 
-      const novaProposta = {
-        id: "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-        numero: p.numero,
-        titulo: p.titulo || "Proposta sem título",
-        tipo: p.tipo || DEFAULT_TIPOS[0],
-        clienteId: clientId,
-        clienteNome: nomeCliente,
-        valorTotal: p.valorTotal || 0,
-        dataGeracao: todayISO(),
-        status: "Pendente",
-      };
-      persistProposals([novaProposta, ...proposalsRef.current]);
+      (async () => {
+        try {
+          // Aguarda o cliente ser salvo antes da proposta, já que ela referencia
+          // cliente_id por chave estrangeira — salvar em paralelo arrisca a proposta
+          // tentar gravar antes do cliente novo existir no banco e falhar silenciosamente.
+          await persistClients(clientList);
 
-      setToast(
-        (match ? "Cliente atualizado" : "Cliente criado") +
-          ": " + nomeCliente + " · proposta nº " + p.numero + " adicionada em Propostas."
-      );
-      setTimeout(() => setToast(null), 6000);
+          const novaProposta = {
+            id: "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+            numero: p.numero,
+            titulo: p.titulo || "Proposta sem título",
+            tipo: p.tipo || DEFAULT_TIPOS[0],
+            clienteId: clientId,
+            clienteNome: nomeCliente,
+            valorTotal: p.valorTotal || 0,
+            dataGeracao: todayISO(),
+            status: "Pendente",
+          };
+          await persistProposals([novaProposta, ...proposalsRef.current]);
+
+          setToast(
+            (match ? "Cliente atualizado" : "Cliente criado") +
+              ": " + nomeCliente + " · proposta nº " + p.numero + " adicionada em Propostas."
+          );
+          setTimeout(() => setToast(null), 6000);
+        } catch (e) {
+          console.error("Falha ao salvar cliente/proposta do Gerador", e);
+          setToast("Não consegui salvar a proposta no painel: " + (e?.message || e?.error_description || JSON.stringify(e)));
+          setTimeout(() => setToast(null), 12000);
+        }
+      })();
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -2578,18 +2632,74 @@ export default function App() {
     [kanbanTasks]
   );
 
-  const filteredTransacoes = useMemo(() => {
-    let list = transacoes.filter((t) => mesRef(t.data) === monthAnchor || (!t.data && financeFilter === "todos"));
-    if (financeFilter === "atrasadas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
-    else if (financeFilter === "pagas") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Pago");
-    else if (financeFilter === "pendentes") list = list.filter((t) => getStatusPagamentoEfetivo(t) === "Pendente");
+  const filteredTransacoesBase = useMemo(() => {
+    let list = transacoes.filter((t) => mesRef(t.data) === monthAnchor || !t.data);
     if (tagFilterIds.length > 0) list = list.filter((t) => (t.tags || []).some((id) => tagFilterIds.includes(id)));
     if (financeClienteFilter) list = list.filter((t) => t.clienteId === financeClienteFilter);
     return list;
-  }, [transacoes, financeFilter, monthAnchor, tagFilterIds, financeClienteFilter]);
+  }, [transacoes, monthAnchor, tagFilterIds, financeClienteFilter]);
 
-  const filteredReceitas = useMemo(() => filteredTransacoes.filter((t) => t.tipo === "Receita"), [filteredTransacoes]);
-  const filteredDespesas = useMemo(() => filteredTransacoes.filter((t) => t.tipo === "Despesa"), [filteredTransacoes]);
+  function aplicarFiltroStatus(list, statusFiltro) {
+    if (statusFiltro === "atrasadas") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
+    if (statusFiltro === "pagas") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Pago");
+    if (statusFiltro === "pendentes") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Pendente");
+    return list;
+  }
+
+  function getFinanceSortValue(t, key) {
+    switch (key) {
+      case "descricao": return t.descricao || "";
+      case "categoria": return t.categoria || "";
+      case "natureza": return t.natureza || "Variável";
+      case "cliente": {
+        const d = demands.find((x) => x.id === t.demandaId);
+        return clientName(t.clienteId) + (d ? " " + d.projeto : "");
+      }
+      case "valor": return parseFloat(t.valor) || 0;
+      case "vencimento": return t.data || "";
+      case "status": return getStatusPagamentoEfetivo(t);
+      default: return "";
+    }
+  }
+
+  function ordenarTransacoes(list, sortKey, sortDir) {
+    if (!sortKey) return list;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const va = getFinanceSortValue(a, sortKey);
+      const vb = getFinanceSortValue(b, sortKey);
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * dir;
+    });
+  }
+
+  function toggleFinanceSort(painel, key) {
+    const sortKey = painel === "receitas" ? financeReceitasSortKey : financeDespesasSortKey;
+    const sortDir = painel === "receitas" ? financeReceitasSortDir : financeDespesasSortDir;
+    const setKey = painel === "receitas" ? setFinanceReceitasSortKey : setFinanceDespesasSortKey;
+    const setDir = painel === "receitas" ? setFinanceReceitasSortDir : setFinanceDespesasSortDir;
+    if (sortKey !== key) { setKey(key); setDir("asc"); }
+    else if (sortDir === "asc") { setDir("desc"); }
+    else { setKey(null); }
+  }
+
+  const filteredReceitas = useMemo(
+    () => ordenarTransacoes(aplicarFiltroStatus(filteredTransacoesBase.filter((t) => t.tipo === "Receita"), financeStatusReceitaFilter), financeReceitasSortKey, financeReceitasSortDir),
+    [filteredTransacoesBase, financeStatusReceitaFilter, financeReceitasSortKey, financeReceitasSortDir, demands, clients]
+  );
+  const filteredDespesas = useMemo(
+    () => ordenarTransacoes(aplicarFiltroStatus(filteredTransacoesBase.filter((t) => t.tipo === "Despesa"), financeStatusDespesaFilter), financeDespesasSortKey, financeDespesasSortDir),
+    [filteredTransacoesBase, financeStatusDespesaFilter, financeDespesasSortKey, financeDespesasSortDir, demands, clients]
+  );
+
+  const saldoAcumulado = useMemo(() => {
+    const num = (v) => parseFloat(v) || 0;
+    return transacoes.reduce((acc, t) => {
+      if (t.statusPagamento !== "Pago") return acc;
+      if (mesRef(t.data) > monthAnchor) return acc;
+      return acc + (t.tipo === "Receita" ? num(t.valor) : -num(t.valor));
+    }, 0);
+  }, [transacoes, monthAnchor]);
 
   return (
     <div className="app">
@@ -2868,6 +2978,10 @@ export default function App() {
           background: var(--surface); border: 1px solid var(--amber); border-radius: 20px; padding: 5px 12px;
           font-size: 12.5px; width: 180px; flex-shrink: 0;
         }
+        .kanban-inbox-bar.pendencias { background: rgba(226,87,76,0.06); border-color: var(--red); }
+        .kanban-inbox-bar.pendencias .kanban-inbox-label { color: var(--red); }
+        .kanban-inbox-bar.pendencias .kanban-chip:hover { border-color: var(--red); }
+        .kanban-chip-date { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
         .kanban-board { display: grid; grid-template-columns: repeat(7, minmax(190px, 1fr)); gap: 10px; overflow-x: auto; }
         .kanban-col { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; min-height: 220px; display: flex; flex-direction: column; transition: background 0.15s, border-color 0.15s; }
         .kanban-col.today { border-color: var(--brand); }
@@ -2898,8 +3012,18 @@ export default function App() {
         .config-panel { max-width: 480px; }
         .config-section-title { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 0.5px; margin: 0 0 4px 0; }
         .finance-panel { margin-bottom: 28px; }
-        .finance-panel-title { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+        .finance-panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .finance-panel-title-right { display: flex; align-items: center; gap: 12px; }
         .finance-panel-total { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text-dim); font-weight: 500; }
+        .finance-saldo-card {
+          background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+          padding: 16px 20px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;
+          gap: 14px; flex-wrap: wrap; backdrop-filter: blur(8px);
+        }
+        .finance-saldo-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }
+        .finance-saldo-hint { font-size: 11.5px; color: var(--text-dim); }
+        .finance-saldo-valor { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: var(--teal); }
+        .finance-saldo-valor.negativo { color: var(--red); }
         .config-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 16px 0; }
         .config-tipo-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
         .config-tipo-item { display: flex; align-items: center; justify-content: space-between; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
@@ -3112,7 +3236,8 @@ export default function App() {
         tr.clickable-row:hover td { background: var(--surface-alt); }
         .video-subrow td { background: var(--surface-alt); padding: 10px 10px 10px 46px; border-bottom: 1px solid var(--border); }
         .video-sublist { display: flex; flex-direction: column; gap: 6px; }
-        .video-subrow-item { display: flex; align-items: center; gap: 10px; }
+        .video-subrow-item { display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 6px; }
+        .video-subrow-item.done { background: rgba(111,191,115,0.18); }
         .video-subrow-name { flex: 1; font-size: 12.5px; color: var(--text); }
         .video-subrow-item select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 170px; }
         .demand-status-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-family: inherit; }
@@ -3635,7 +3760,7 @@ export default function App() {
                               <td colSpan={8}>
                                 <div className="video-sublist">
                                   {d.itens.map((v, idx) => (
-                                    <div key={v.id} className="video-subrow-item">
+                                    <div key={v.id} className={"video-subrow-item" + (v.statusAprovacao === "Aprovado" ? " done" : "")}>
                                       <span className="video-subrow-name">{v.nome || "Vídeo " + (idx + 1)}</span>
                                       <select
                                         value={v.statusEnvio}
@@ -3852,6 +3977,15 @@ export default function App() {
                 <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, 1))}><ChevronRight size={14} /></button>
                 <button className="btn-ghost kanban-today-btn" onClick={() => setMonthAnchor(mesRef(todayISO()))}>Mês atual</button>
               </div>
+              <div className="finance-saldo-card">
+                <div>
+                  <div className="finance-saldo-label">Saldo acumulado até {mesLabel(monthAnchor)}</div>
+                  <div className="finance-saldo-hint">Inclui a sobra (ou falta) que veio de meses anteriores</div>
+                </div>
+                <div className={"finance-saldo-valor" + (saldoAcumulado < 0 ? " negativo" : "")}>
+                  R$ {saldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                </div>
+              </div>
               <div className="finance-top-grid">
                 <div className="finance-cards">
                   <div className="stat ready">
@@ -3886,17 +4020,8 @@ export default function App() {
                   id="financeiro"
                   openId={openFilterMenu}
                   setOpenId={setOpenFilterMenu}
-                  activeCount={(financeFilter !== "todos" ? 1 : 0) + (financeClienteFilter ? 1 : 0)}
+                  activeCount={financeClienteFilter ? 1 : 0}
                 >
-                  <div className="filter-menu-field">
-                    <label>Transações</label>
-                    <select value={financeFilter} onChange={(e) => setFinanceFilter(e.target.value)}>
-                      <option value="todos">Todas as transações</option>
-                      <option value="atrasadas">Só atrasadas</option>
-                      <option value="pagas">Só pagas</option>
-                      <option value="pendentes">Só pendentes</option>
-                    </select>
-                  </div>
                   <div className="filter-menu-field">
                     <label>Cliente</label>
                     <select value={financeClienteFilter} onChange={(e) => setFinanceClienteFilter(e.target.value)}>
@@ -3906,8 +4031,8 @@ export default function App() {
                       ))}
                     </select>
                   </div>
-                  {(financeFilter !== "todos" || financeClienteFilter) && (
-                    <button className="filter-menu-clear" onClick={() => { setFinanceFilter("todos"); setFinanceClienteFilter(""); }}>
+                  {financeClienteFilter && (
+                    <button className="filter-menu-clear" onClick={() => setFinanceClienteFilter("")}>
                       Limpar filtros
                     </button>
                   )}
@@ -3968,7 +4093,30 @@ export default function App() {
               <div className="finance-panel">
                 <h3 className="config-section-title finance-panel-title">
                   <span>Receitas — {mesLabel(monthAnchor)}</span>
-                  <span className="finance-panel-total">R$ {filteredReceitas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                  <span className="finance-panel-title-right">
+                    <FilterMenu
+                      id="financeiro-receitas"
+                      openId={openFilterMenu}
+                      setOpenId={setOpenFilterMenu}
+                      activeCount={financeStatusReceitaFilter !== "todos" ? 1 : 0}
+                    >
+                      <div className="filter-menu-field">
+                        <label>Status</label>
+                        <select value={financeStatusReceitaFilter} onChange={(e) => setFinanceStatusReceitaFilter(e.target.value)}>
+                          <option value="todos">Todos os status</option>
+                          <option value="atrasadas">Só atrasadas</option>
+                          <option value="pagas">Só pagas</option>
+                          <option value="pendentes">Só pendentes</option>
+                        </select>
+                      </div>
+                      {financeStatusReceitaFilter !== "todos" && (
+                        <button className="filter-menu-clear" onClick={() => setFinanceStatusReceitaFilter("todos")}>
+                          Limpar filtro
+                        </button>
+                      )}
+                    </FilterMenu>
+                    <span className="finance-panel-total">R$ {filteredReceitas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                  </span>
                 </h3>
                 {filteredReceitas.length === 0 ? (
                   <div className="empty">Nenhuma receita neste mês. Receitas de propostas confirmadas aparecem automaticamente.</div>
@@ -3976,12 +4124,12 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Descrição</th>
-                        <th>Categoria</th>
-                        <th>Cliente / Demanda</th>
-                        <th>Valor</th>
-                        <th>Vencimento</th>
-                        <th>Status</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "descricao")}>Descrição {financeReceitasSortKey === "descricao" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "categoria")}>Categoria {financeReceitasSortKey === "categoria" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "cliente")}>Cliente / Demanda {financeReceitasSortKey === "cliente" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "valor")}>Valor {financeReceitasSortKey === "valor" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "vencimento")}>Vencimento {financeReceitasSortKey === "vencimento" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "status")}>Status {financeReceitasSortKey === "status" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -4029,7 +4177,30 @@ export default function App() {
               <div className="finance-panel">
                 <h3 className="config-section-title finance-panel-title">
                   <span>Despesas — {mesLabel(monthAnchor)}</span>
-                  <span className="finance-panel-total">R$ {filteredDespesas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                  <span className="finance-panel-title-right">
+                    <FilterMenu
+                      id="financeiro-despesas"
+                      openId={openFilterMenu}
+                      setOpenId={setOpenFilterMenu}
+                      activeCount={financeStatusDespesaFilter !== "todos" ? 1 : 0}
+                    >
+                      <div className="filter-menu-field">
+                        <label>Status</label>
+                        <select value={financeStatusDespesaFilter} onChange={(e) => setFinanceStatusDespesaFilter(e.target.value)}>
+                          <option value="todos">Todos os status</option>
+                          <option value="atrasadas">Só atrasadas</option>
+                          <option value="pagas">Só pagas</option>
+                          <option value="pendentes">Só pendentes</option>
+                        </select>
+                      </div>
+                      {financeStatusDespesaFilter !== "todos" && (
+                        <button className="filter-menu-clear" onClick={() => setFinanceStatusDespesaFilter("todos")}>
+                          Limpar filtro
+                        </button>
+                      )}
+                    </FilterMenu>
+                    <span className="finance-panel-total">R$ {filteredDespesas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                  </span>
                 </h3>
                 {filteredDespesas.length === 0 ? (
                   <div className="empty">Nenhuma despesa neste mês.</div>
@@ -4037,14 +4208,14 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Descrição</th>
-                        <th>Categoria</th>
-                        <th>Natureza</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "descricao")}>Descrição {financeDespesasSortKey === "descricao" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "categoria")}>Categoria {financeDespesasSortKey === "categoria" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "natureza")}>Natureza {financeDespesasSortKey === "natureza" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th>Tags</th>
-                        <th>Cliente / Demanda</th>
-                        <th>Valor</th>
-                        <th>Vencimento</th>
-                        <th>Status</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "cliente")}>Cliente / Demanda {financeDespesasSortKey === "cliente" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "valor")}>Valor {financeDespesasSortKey === "valor" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "vencimento")}>Vencimento {financeDespesasSortKey === "vencimento" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "status")}>Status {financeDespesasSortKey === "status" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th></th>
                       </tr>
                     </thead>
