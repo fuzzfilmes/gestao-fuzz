@@ -275,8 +275,7 @@ const emptyDemand = () => ({
   ordem: 0,
 });
 
-const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", statusEnvio: "Não enviado", statusAprovacao: "Aguardando" });
-const VIDEO_STATUS_ENVIO = ["Não enviado", "Enviado"];
+const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", statusProducao: STATUS_PRODUCAO[0], statusAprovacao: "Aguardando" });
 const VIDEO_STATUS_APROVACAO = ["Aguardando", "Aprovado", "Alteração solicitada"];
 
 const emptyClient = () => ({
@@ -313,7 +312,7 @@ function getUrgencia(d) {
   if (d.statusProducao === "Finalizada") return { label: "Concluído", tone: "done" };
   if (d.statusProducao === "StandBy") return { label: "StandBy", tone: "standby" };
   const itens = d.itens || [];
-  const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.statusEnvio === "Enviado" && v.statusAprovacao === "Aguardando");
+  const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.statusProducao === "Finalizada" && v.statusAprovacao === "Aguardando");
   if (d.statusAprovacao === "Aguardando" || todosVideosAguardandoCliente) return { label: "Aguardando cliente", tone: "wait" };
   if (!d.dataEntrega) return { label: "Sem prazo", tone: "neutral" };
   const today = new Date(todayISO() + "T00:00:00");
@@ -343,6 +342,13 @@ function videoProgress(d) {
 
 function demandaPeso(d) {
   return d.itens && d.itens.length > 0 ? d.itens.length : 1;
+}
+
+function corStatusVideo(v, coresStatus) {
+  if (v.statusAprovacao === "Aprovado") return corDoStatusComMapa(coresStatus, "aprovacao", "Aprovado");
+  if (v.statusAprovacao === "Alteração solicitada") return corDoStatusComMapa(coresStatus, "aprovacao", "Alteração solicitada");
+  if (v.statusProducao === "Não iniciada") return null;
+  return corDoStatusComMapa(coresStatus, "producao", v.statusProducao);
 }
 
 const FOLLOWUP_DIAS = 7;
@@ -3237,7 +3243,6 @@ export default function App() {
         .video-subrow td { background: var(--surface-alt); padding: 10px 10px 10px 46px; border-bottom: 1px solid var(--border); }
         .video-sublist { display: flex; flex-direction: column; gap: 6px; }
         .video-subrow-item { display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 6px; }
-        .video-subrow-item.done { background: rgba(111,191,115,0.18); }
         .video-subrow-name { flex: 1; font-size: 12.5px; color: var(--text); }
         .video-subrow-item select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 170px; }
         .demand-status-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-family: inherit; }
@@ -3759,23 +3764,32 @@ export default function App() {
                             <tr className="video-subrow">
                               <td colSpan={8}>
                                 <div className="video-sublist">
-                                  {d.itens.map((v, idx) => (
-                                    <div key={v.id} className={"video-subrow-item" + (v.statusAprovacao === "Aprovado" ? " done" : "")}>
-                                      <span className="video-subrow-name">{v.nome || "Vídeo " + (idx + 1)}</span>
-                                      <select
-                                        value={v.statusEnvio}
-                                        onChange={(e) => updateVideoField(d.id, v.id, "statusEnvio", e.target.value)}
+                                  {d.itens.map((v, idx) => {
+                                    const cor = corStatusVideo(v, coresStatus);
+                                    return (
+                                      <div
+                                        key={v.id}
+                                        className="video-subrow-item"
+                                        style={cor ? { background: `color-mix(in srgb, ${cor} 18%, transparent)` } : undefined}
                                       >
-                                        {VIDEO_STATUS_ENVIO.map((s) => <option key={s} value={s}>{s}</option>)}
-                                      </select>
-                                      <select
-                                        value={v.statusAprovacao}
-                                        onChange={(e) => updateVideoField(d.id, v.id, "statusAprovacao", e.target.value)}
-                                      >
-                                        {VIDEO_STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
-                                      </select>
-                                    </div>
-                                  ))}
+                                        <span className="video-subrow-name">{v.nome || "Vídeo " + (idx + 1)}</span>
+                                        <select
+                                          value={v.statusProducao}
+                                          onChange={(e) => updateVideoField(d.id, v.id, "statusProducao", e.target.value)}
+                                          style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "producao", v.statusProducao) }}
+                                        >
+                                          {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                        <select
+                                          value={v.statusAprovacao}
+                                          onChange={(e) => updateVideoField(d.id, v.id, "statusAprovacao", e.target.value)}
+                                          style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "aprovacao", v.statusAprovacao) }}
+                                        >
+                                          {VIDEO_STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </td>
                             </tr>
@@ -5018,13 +5032,13 @@ export default function App() {
                     }}
                   />
                   <select
-                    value={v.statusEnvio}
+                    value={v.statusProducao}
                     onChange={(e) => {
-                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, statusEnvio: e.target.value } : it));
+                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, statusProducao: e.target.value } : it));
                       setDemandForm({ ...demandForm, itens });
                     }}
                   >
-                    {VIDEO_STATUS_ENVIO.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <select
                     value={v.statusAprovacao}

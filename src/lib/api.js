@@ -118,7 +118,7 @@ function itemToRow(demandaId, it, ordem) {
     id: it.id,
     demanda_id: demandaId,
     nome: it.nome || "",
-    status_envio: it.statusEnvio || "Não enviado",
+    status_producao: it.statusProducao || "Não iniciada",
     status_aprovacao: it.statusAprovacao || "Aguardando",
     ordem,
   };
@@ -141,7 +141,7 @@ function demandaFromRow(r, itensByDemanda) {
     itens: (itensByDemanda.get(r.id) || []).map((it) => ({
       id: it.id,
       nome: it.nome,
-      statusEnvio: it.status_envio,
+      statusProducao: it.status_producao,
       statusAprovacao: it.status_aprovacao,
     })),
   };
