@@ -270,6 +270,7 @@ function transacaoToRow(t) {
     tipo: t.tipo,
     descricao: t.descricao || "",
     categoria: t.categoria || "",
+    tipo_receita: t.tipoReceita || "",
     natureza: t.natureza || "Variável",
     valor: num(t.valor),
     data: n(t.data),
@@ -288,6 +289,7 @@ function transacaoFromRow(r, tagsByTransacao) {
     tipo: r.tipo,
     descricao: r.descricao,
     categoria: r.categoria,
+    tipoReceita: r.tipo_receita || "",
     natureza: r.natureza,
     valor: String(r.valor),
     data: r.data || "",
@@ -414,6 +416,36 @@ export async function renomearTipoProducaoRow(nomeAntigo, nomeNovo, ordem) {
   throwIfError(await supabase.from("tipos_producao").insert({ nome: nomeNovo, ordem }));
 }
 
+// ---------------- Tipos de receita ----------------
+
+export async function listTiposReceita() {
+  const res = await supabase.from("tipos_receita").select("*").order("ordem", { ascending: true });
+  throwIfError(res);
+  return res.data.map((r) => r.nome);
+}
+export async function seedTiposReceitaSeVazio(defaults) {
+  const atuais = await listTiposReceita();
+  if (atuais.length) return atuais;
+  throwIfError(
+    await supabase.from("tipos_receita").insert(defaults.map((nome, i) => ({ nome, ordem: i })))
+  );
+  return defaults;
+}
+export async function syncTiposReceita(prevList, nextList) {
+  const prevSet = new Set(prevList);
+  const nextSet = new Set(nextList);
+  const toDelete = prevList.filter((nomeItem) => !nextSet.has(nomeItem));
+  const toInsert = nextList
+    .filter((nomeItem) => !prevSet.has(nomeItem))
+    .map((nomeItem) => ({ nome: nomeItem, ordem: nextList.indexOf(nomeItem) }));
+  if (toDelete.length) {
+    throwIfError(await supabase.from("tipos_receita").delete().in("nome", toDelete));
+  }
+  if (toInsert.length) {
+    throwIfError(await supabase.from("tipos_receita").insert(toInsert));
+  }
+}
+
 // ---------------- Categorias de equipamento ----------------
 
 export async function listCategoriasEquipamento() {
@@ -484,6 +516,30 @@ export const syncMetasMensais = (prev, next) => syncMetas("metas_mensais", "mes"
 export const syncMetasAnuais = (prev, next) => syncMetas("metas_anuais", "ano", prev, next, (v) => num(v));
 export const syncMetasClientesMensais = (prev, next) =>
   syncMetas("metas_clientes_mensais", "mes", prev, next, (v) => intOrNull(v) ?? 0);
+
+// ---------------- Parâmetros financeiros (saúde financeira) ----------------
+
+export async function getParametrosFinanceiros() {
+  const res = await supabase.from("parametros_financeiros").select("*").maybeSingle();
+  throwIfError(res);
+  const r = res.data;
+  return {
+    pctImposto: r ? Number(r.pct_imposto) || 0 : 0,
+    proLabore: r ? Number(r.pro_labore) || 0 : 0,
+    pctReserva: r ? Number(r.pct_reserva) || 0 : 0,
+  };
+}
+export async function setParametrosFinanceiros(p) {
+  const { data: { user } } = await supabase.auth.getUser();
+  throwIfError(
+    await supabase.from("parametros_financeiros").upsert({
+      user_id: user.id,
+      pct_imposto: num(p.pctImposto),
+      pro_labore: num(p.proLabore),
+      pct_reserva: num(p.pctReserva),
+    })
+  );
+}
 
 // ---------------- Processos internos ----------------
 

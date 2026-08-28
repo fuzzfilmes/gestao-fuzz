@@ -31,6 +31,7 @@ function corDoStatusComMapa(mapa, tipo, valor) {
   return (mapa && mapa[chave]) || DEFAULT_CORES_STATUS[chave] || "#8a8f98";
 }
 const DEFAULT_TIPOS = ["Produção Comercial", "Institucional", "Podcast", "Motion", "Outro"];
+const DEFAULT_TIPOS_RECEITA = ["Prestação de serviço", "Deslocamento", "Reembolso", "Outro"];
 const DEFAULT_PROCESSOS_CATEGORIAS = ["Mensagens padrão", "Dados de pagamento", "Termos de uso de imagem", "Captação", "Edição", "Treinamentos"];
 const PROCESSO_ARQUIVO_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -226,6 +227,7 @@ const emptyTransacao = (tipo = "Receita") => ({
   tipo,
   descricao: "",
   categoria: tipo === "Receita" ? CATEGORIAS_RECEITA[0] : CATEGORIAS_DESPESA[0],
+  tipoReceita: "",
   natureza: "Variável",
   valor: "",
   data: "",
@@ -1244,6 +1246,7 @@ export default function App() {
   const [proposals, setProposals] = useState([]);
   const [transacoes, setTransacoes] = useState([]);
   const [tiposProducao, setTiposProducao] = useState(DEFAULT_TIPOS);
+  const [tiposReceita, setTiposReceita] = useState(DEFAULT_TIPOS_RECEITA);
   const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
   const [coresStatus, setCoresStatus] = useState({});
   const [kanbanTasks, setKanbanTasks] = useState([]);
@@ -1295,6 +1298,18 @@ export default function App() {
   const [metaInputValue, setMetaInputValue] = useState("");
   const [metaAnualInputValue, setMetaAnualInputValue] = useState("");
   const [metaClientesInputValue, setMetaClientesInputValue] = useState("");
+  const [parametrosFinanceiros, setParametrosFinanceiros] = useState({ pctImposto: 0, proLabore: 0, pctReserva: 0 });
+  const parametrosFinanceirosRef = useRef(parametrosFinanceiros);
+  parametrosFinanceirosRef.current = parametrosFinanceiros;
+  const [pctImpostoInput, setPctImpostoInput] = useState("");
+  const [proLaboreInput, setProLaboreInput] = useState("");
+  const [pctReservaInput, setPctReservaInput] = useState("");
+
+  useEffect(() => {
+    setPctImpostoInput(parametrosFinanceiros.pctImposto ? String(parametrosFinanceiros.pctImposto) : "");
+    setProLaboreInput(parametrosFinanceiros.proLabore ? String(parametrosFinanceiros.proLabore) : "");
+    setPctReservaInput(parametrosFinanceiros.pctReserva ? String(parametrosFinanceiros.pctReserva) : "");
+  }, [parametrosFinanceiros]);
 
   useEffect(() => {
     if (!clientViewInfo) {
@@ -1326,6 +1341,9 @@ export default function App() {
   const [configSecaoAtiva, setConfigSecaoAtiva] = useState(null);
   const [tipoEditando, setTipoEditando] = useState(null);
   const [tipoEditValue, setTipoEditValue] = useState("");
+  const [novoTipoReceitaInput, setNovoTipoReceitaInput] = useState("");
+  const [tipoReceitaEditando, setTipoReceitaEditando] = useState(null);
+  const [tipoReceitaEditValue, setTipoReceitaEditValue] = useState("");
   const [novaCategoriaEquipInput, setNovaCategoriaEquipInput] = useState("");
   const [categoriaEquipEditando, setCategoriaEquipEditando] = useState(null);
   const [categoriaEquipEditValue, setCategoriaEquipEditValue] = useState("");
@@ -1370,7 +1388,11 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const load = (label, fn, setter, fallback) =>
-        fn().then(setter, (e) => {
+        fn().catch(async (e) => {
+          console.warn("Falha ao carregar " + label + ", tentando novamente…", e);
+          await new Promise((r) => setTimeout(r, 700));
+          return fn();
+        }).then(setter, (e) => {
           console.error("Falha ao carregar " + label, e);
           setter(fallback);
         });
@@ -1380,6 +1402,7 @@ export default function App() {
         load("propostas", api.listPropostas, setProposals, []),
         load("transações", api.listTransacoes, setTransacoes, []),
         load("tipos de produção", () => api.seedTiposProducaoSeVazio(DEFAULT_TIPOS), setTiposProducao, DEFAULT_TIPOS),
+        load("tipos de receita", () => api.seedTiposReceitaSeVazio(DEFAULT_TIPOS_RECEITA), setTiposReceita, DEFAULT_TIPOS_RECEITA),
         load(
           "categorias de equipamento",
           () => api.seedCategoriasEquipamentoSeVazio(DEFAULT_CATEGORIAS_EQUIP),
@@ -1391,6 +1414,7 @@ export default function App() {
         load("metas", api.listMetasMensais, setMetas, {}),
         load("metas anuais", api.listMetasAnuais, setMetasAnuais, {}),
         load("meta de clientes", api.listMetasClientesMensais, setMetasClientesNovos, {}),
+        load("parâmetros financeiros", api.getParametrosFinanceiros, setParametrosFinanceiros, { pctImposto: 0, proLabore: 0, pctReserva: 0 }),
         load("tags", api.listTags, setTags, []),
         load("equipamentos", api.listEquipamentos, setEquipamentos, []),
         load(
@@ -1587,6 +1611,7 @@ export default function App() {
         data: todayISO(),
         demandaId: novaDemanda.id,
         clienteId: prop.clienteId,
+        tipoReceita: tiposReceita[0] || "",
         observacoes: "Gerada automaticamente a partir da Proposta nº " + prop.numero,
       };
       persistTransacoes([novaReceita, ...transacoesRef.current]);
@@ -1711,6 +1736,20 @@ export default function App() {
     persistMetasClientes({ ...metasClientesNovos, [mes]: valor });
   }
 
+  async function salvarParametrosFinanceiros(partial) {
+    // Mescla sobre o valor mais recente via ref (não sobre o estado capturado no
+    // closure do botão) — assim, clicar em "Salvar" de dois campos em sequência
+    // rápida não faz um sobrescrever o outro.
+    const merged = { ...parametrosFinanceirosRef.current, ...partial };
+    parametrosFinanceirosRef.current = merged;
+    setParametrosFinanceiros(merged);
+    try {
+      await api.setParametrosFinanceiros(merged);
+    } catch (e) {
+      console.error("Falha ao salvar parâmetros financeiros", e);
+    }
+  }
+
   async function persistTags(list) {
     const prev = tags;
     setTags(list);
@@ -1813,6 +1852,37 @@ export default function App() {
     if (coresStatus[chaveAntiga]) {
       const { [chaveAntiga]: cor, ...resto } = coresStatus;
       persistCoresStatus({ ...resto, ["tipo:" + limpo]: cor });
+    }
+  }
+
+  async function persistTiposReceita(list) {
+    const prev = tiposReceita;
+    setTiposReceita(list);
+    try {
+      await api.syncTiposReceita(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar tipos de receita", e);
+    }
+  }
+
+  function addTipoReceita(nome) {
+    const limpo = nome.trim();
+    if (!limpo || tiposReceita.includes(limpo)) return;
+    persistTiposReceita([...tiposReceita, limpo]);
+  }
+
+  function removeTipoReceita(nome) {
+    persistTiposReceita(tiposReceita.filter((t) => t !== nome));
+  }
+
+  function renomearTipoReceita(nomeAntigo, nomeNovo) {
+    const limpo = nomeNovo.trim();
+    if (!limpo || limpo === nomeAntigo || tiposReceita.includes(limpo)) return;
+    persistTiposReceita(tiposReceita.map((t) => (t === nomeAntigo ? limpo : t)));
+    if (transacoesRef.current.some((t) => t.tipo === "Receita" && t.tipoReceita === nomeAntigo)) {
+      persistTransacoes(
+        transacoesRef.current.map((t) => (t.tipo === "Receita" && t.tipoReceita === nomeAntigo ? { ...t, tipoReceita: limpo } : t))
+      );
     }
   }
 
@@ -2296,6 +2366,23 @@ export default function App() {
 
   const relatorioStatsMes = useMemo(() => computeMonthStats(transacoes, relatorioMes), [transacoes, relatorioMes]);
 
+  const relatorioReceitasPorTipo = useMemo(() => {
+    const num = (v) => parseFloat(v) || 0;
+    const doMes = transacoes.filter((t) => t.tipo === "Receita" && mesRef(t.data) === relatorioMes);
+    const porTipo = {};
+    let semTipo = 0;
+    doMes.forEach((t) => {
+      const chave = t.tipoReceita || "";
+      if (!chave) { semTipo += num(t.valor); return; }
+      porTipo[chave] = (porTipo[chave] || 0) + num(t.valor);
+    });
+    const linhas = Object.entries(porTipo)
+      .map(([nome, valor]) => ({ nome, valor }))
+      .sort((a, b) => b.valor - a.valor);
+    if (semTipo > 0) linhas.push({ nome: "Sem tipo definido", valor: semTipo });
+    return linhas;
+  }, [transacoes, relatorioMes]);
+
   const relatorioPropostasDoMes = useMemo(
     () => proposals.filter((p) => mesRef(p.dataGeracao) === relatorioMes),
     [proposals, relatorioMes]
@@ -2707,6 +2794,19 @@ export default function App() {
     }, 0);
   }, [transacoes, monthAnchor]);
 
+  const saudeFinanceiraMes = useMemo(() => {
+    const faturado = financeStatsMes.totalReceita;
+    const despesasOperacionais = financeStatsMes.totalDespesas;
+    const impostoValor = (faturado * (parseFloat(parametrosFinanceiros.pctImposto) || 0)) / 100;
+    const proLaboreValor = parseFloat(parametrosFinanceiros.proLabore) || 0;
+    const reservaValor = (faturado * (parseFloat(parametrosFinanceiros.pctReserva) || 0)) / 100;
+    const sobraLivre = faturado - despesasOperacionais - impostoValor - proLaboreValor - reservaValor;
+    const mediaDespesas = ultimosMeses.reduce((s, m) => s + m.totalDespesas, 0) / (ultimosMeses.length || 1);
+    const custoMensalTotal = mediaDespesas + proLaboreValor;
+    const mesesGarantidos = custoMensalTotal > 0 ? saldoAcumulado / custoMensalTotal : null;
+    return { faturado, despesasOperacionais, impostoValor, proLaboreValor, reservaValor, sobraLivre, mediaDespesas, mesesGarantidos };
+  }, [financeStatsMes, parametrosFinanceiros, ultimosMeses, saldoAcumulado]);
+
   return (
     <div className="app">
       <style>{`
@@ -3027,7 +3127,6 @@ export default function App() {
           gap: 14px; flex-wrap: wrap; backdrop-filter: blur(8px);
         }
         .finance-saldo-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }
-        .finance-saldo-hint { font-size: 11.5px; color: var(--text-dim); }
         .finance-saldo-valor { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: var(--teal); }
         .finance-saldo-valor.negativo { color: var(--red); }
         .config-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 16px 0; }
@@ -3994,10 +4093,9 @@ export default function App() {
               <div className="finance-saldo-card">
                 <div>
                   <div className="finance-saldo-label">Saldo acumulado até {mesLabel(monthAnchor)}</div>
-                  <div className="finance-saldo-hint">Inclui a sobra (ou falta) que veio de meses anteriores</div>
                 </div>
                 <div className={"finance-saldo-valor" + (saldoAcumulado < 0 ? " negativo" : "")}>
-                  R$ {saldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                  R$ {saldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
               <div className="finance-top-grid">
@@ -4054,7 +4152,7 @@ export default function App() {
                 <button className="btn-despesa" onClick={() => setTransacaoForm({ ...emptyTransacao("Despesa"), data: monthAnchor + "-05" })}>
                   <Plus size={14} />Nova despesa
                 </button>
-                <button className="btn-receita" onClick={() => setTransacaoForm({ ...emptyTransacao("Receita"), categoria: tiposProducao[0] || "", data: monthAnchor + "-05" })}>
+                <button className="btn-receita" onClick={() => setTransacaoForm({ ...emptyTransacao("Receita"), categoria: tiposProducao[0] || "", tipoReceita: tiposReceita[0] || "", data: monthAnchor + "-05" })}>
                   <Plus size={15} /> Nova receita
                 </button>
               </div>
@@ -4129,7 +4227,7 @@ export default function App() {
                         </button>
                       )}
                     </FilterMenu>
-                    <span className="finance-panel-total">R$ {filteredReceitas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    <span className="finance-panel-total">R$ {filteredReceitas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </span>
                 </h3>
                 {filteredReceitas.length === 0 ? (
@@ -4213,7 +4311,7 @@ export default function App() {
                         </button>
                       )}
                     </FilterMenu>
-                    <span className="finance-panel-total">R$ {filteredDespesas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                    <span className="finance-panel-total">R$ {filteredDespesas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </span>
                 </h3>
                 {filteredDespesas.length === 0 ? (
@@ -4299,6 +4397,40 @@ export default function App() {
                     </tbody>
                   </table>
                 )}
+              </div>
+
+              <div className="finance-panel">
+                <h3 className="config-section-title">Resumo financeiro — {mesLabel(monthAnchor)}</h3>
+                {!parametrosFinanceiros.pctImposto && !parametrosFinanceiros.proLabore && !parametrosFinanceiros.pctReserva && (
+                  <p className="config-hint" style={{ marginBottom: 16 }}>
+                    Configure imposto, pró-labore e reserva em Configurações → Saúde financeira pra refinar esse resumo.
+                  </p>
+                )}
+                <div className="metas-grid">
+                  <div className="metas-card">
+                    <h4>Distribuição do faturamento</h4>
+                    <div className="metas-line"><span>Faturado</span><b>R$ {saudeFinanceiraMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Despesas operacionais</span><b>- R$ {saudeFinanceiraMes.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {saudeFinanceiraMes.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Pró-labore</span><b>- R$ {saudeFinanceiraMes.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Reserva/investimento ({parametrosFinanceiros.pctReserva || 0}%)</span><b>- R$ {saudeFinanceiraMes.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                      <span>Sobra livre</span>
+                      <b style={{ color: saudeFinanceiraMes.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
+                        R$ {saudeFinanceiraMes.sobraLivre.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </b>
+                    </div>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Fôlego financeiro</h4>
+                    <div className="metas-line"><span>Saldo acumulado</span><b>R$ {saldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Média de despesas (6 meses)</span><b>R$ {saudeFinanceiraMes.mediaDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line">
+                      <span>Meses garantidos</span>
+                      <b>{saudeFinanceiraMes.mesesGarantidos == null ? "—" : saudeFinanceiraMes.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses"}</b>
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           ) : tab === "metas" ? (
@@ -4564,6 +4696,22 @@ export default function App() {
                     <div className="metas-line"><span>Margem</span><b>R$ {relatorioStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
                   </div>
                 </div>
+                {relatorioReceitasPorTipo.length > 0 && (
+                  <>
+                    <h3 className="config-section-title" style={{ marginTop: 24 }}>Receitas por tipo</h3>
+                    <table>
+                      <thead><tr><th>Tipo de receita</th><th>Valor</th></tr></thead>
+                      <tbody>
+                        {relatorioReceitasPorTipo.map((r) => (
+                          <tr key={r.nome}>
+                            <td className="proj">{r.nome}</td>
+                            <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
               </ReportSection>
 
               <ReportSection
@@ -4646,6 +4794,11 @@ export default function App() {
                   <span className="config-card-title">Tipos de produção</span>
                   <span className="config-card-sub">{tiposProducao.length} cadastrados</span>
                 </button>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("tiposReceita")}>
+                  <DollarSign size={20} />
+                  <span className="config-card-title">Tipos de receita</span>
+                  <span className="config-card-sub">{tiposReceita.length} cadastrados</span>
+                </button>
                 <button className="config-card" onClick={() => setConfigSecaoAtiva("categoriasEquip")}>
                   <Camera size={20} />
                   <span className="config-card-title">Categorias de equipamentos</span>
@@ -4661,6 +4814,82 @@ export default function App() {
                   <span className="config-card-title">Metas</span>
                   <span className="config-card-sub">Faturamento, anual e novos clientes</span>
                 </button>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("saudeFinanceira")}>
+                  <TrendingUp size={20} />
+                  <span className="config-card-title">Saúde financeira</span>
+                  <span className="config-card-sub">Imposto, pró-labore e reserva</span>
+                </button>
+              </div>
+            ) : configSecaoAtiva === "saudeFinanceira" ? (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Saúde financeira</h3>
+                <p className="config-hint">Esses parâmetros alimentam o resumo financeiro na aba Financeiro — deixe em branco (0) o que ainda não se aplica.</p>
+                <div className="metas-grid">
+                  <div className="metas-card">
+                    <h4>Imposto sobre faturamento</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="Ex: 6 (%)"
+                        value={pctImpostoInput}
+                        onChange={(e) => setPctImpostoInput(e.target.value)}
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => salvarParametrosFinanceiros({ pctImposto: parseFloat(pctImpostoInput) || 0 })}
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                    <p className="config-hint" style={{ marginTop: 8 }}>% do faturamento do mês reservado pro Simples Nacional / DAS.</p>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Pró-labore mensal</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        placeholder="Ex: 3000"
+                        value={proLaboreInput}
+                        onChange={(e) => setProLaboreInput(e.target.value)}
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => salvarParametrosFinanceiros({ proLabore: parseFloat(proLaboreInput) || 0 })}
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                    <p className="config-hint" style={{ marginTop: 8 }}>Valor fixo em R$ que você retira todo mês.</p>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Reserva / investimento</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="Ex: 10 (%)"
+                        value={pctReservaInput}
+                        onChange={(e) => setPctReservaInput(e.target.value)}
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => salvarParametrosFinanceiros({ pctReserva: parseFloat(pctReservaInput) || 0 })}
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                    <p className="config-hint" style={{ marginTop: 8 }}>% do faturamento do mês reservado pra investir ou guardar de reserva.</p>
+                  </div>
+                </div>
               </div>
             ) : configSecaoAtiva === "metas" ? (
               <div className="config-panel">
@@ -4768,6 +4997,61 @@ export default function App() {
                     className="btn-primary"
                     style={{ marginLeft: 0 }}
                     onClick={() => { addTipoProducao(novoTipoInput); setNovoTipoInput(""); }}
+                  >
+                    <Plus size={15} /> Adicionar
+                  </button>
+                </div>
+              </div>
+            ) : configSecaoAtiva === "tiposReceita" ? (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Tipos de receita</h3>
+                <p className="config-hint">Classificam de onde vem cada receita (prestação de serviço, deslocamento, reembolso etc.), separado do tipo de produção. Usado como filtro nos Relatórios. Renomear atualiza as receitas que já usam esse tipo.</p>
+                <div className="config-tipo-list">
+                  {tiposReceita.map((t) => (
+                    <div className="config-tipo-item" key={t}>
+                      {tipoReceitaEditando === t ? (
+                        <>
+                          <input
+                            value={tipoReceitaEditValue}
+                            autoFocus
+                            onChange={(e) => setTipoReceitaEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { renomearTipoReceita(t, tipoReceitaEditValue); setTipoReceitaEditando(null); }
+                              if (e.key === "Escape") setTipoReceitaEditando(null);
+                            }}
+                          />
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { renomearTipoReceita(t, tipoReceitaEditValue); setTipoReceitaEditando(null); }}><CheckCircle size={13} /></button>
+                            <button className="icon-btn" onClick={() => setTipoReceitaEditando(null)}><X size={13} /></button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span>{t}</span>
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { setTipoReceitaEditando(t); setTipoReceitaEditValue(t); }}><Pencil size={13} /></button>
+                            <button className="icon-btn" onClick={() => removeTipoReceita(t)}><Trash2 size={13} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {tiposReceita.length === 0 && <div className="empty">Nenhum tipo cadastrado ainda.</div>}
+                </div>
+                <div className="config-add-row">
+                  <input
+                    value={novoTipoReceitaInput}
+                    onChange={(e) => setNovoTipoReceitaInput(e.target.value)}
+                    placeholder="Novo tipo de receita…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { addTipoReceita(novoTipoReceitaInput); setNovoTipoReceitaInput(""); }
+                    }}
+                  />
+                  <button
+                    className="btn-primary"
+                    style={{ marginLeft: 0 }}
+                    onClick={() => { addTipoReceita(novoTipoReceitaInput); setNovoTipoReceitaInput(""); }}
                   >
                     <Plus size={15} /> Adicionar
                   </button>
@@ -5306,7 +5590,12 @@ export default function App() {
                   value={transacaoForm.tipo}
                   onChange={(e) => {
                     const tipo = e.target.value;
-                    setTransacaoForm({ ...transacaoForm, tipo, categoria: tipo === "Receita" ? (tiposProducao[0] || "") : CATEGORIAS_DESPESA[0] });
+                    setTransacaoForm({
+                      ...transacaoForm,
+                      tipo,
+                      categoria: tipo === "Receita" ? (tiposProducao[0] || "") : CATEGORIAS_DESPESA[0],
+                      tipoReceita: tipo === "Receita" ? (transacaoForm.tipoReceita || tiposReceita[0] || "") : transacaoForm.tipoReceita,
+                    });
                   }}
                 >
                   <option>Receita</option>
@@ -5322,6 +5611,16 @@ export default function App() {
                 </select>
               </div>
             </div>
+            {transacaoForm.tipo === "Receita" && (
+              <div className="field">
+                <label>Tipo de receita</label>
+                <select value={transacaoForm.tipoReceita} onChange={(e) => setTransacaoForm({ ...transacaoForm, tipoReceita: e.target.value })}>
+                  {tiposReceita.map((tr) => (
+                    <option key={tr} value={tr}>{tr}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="field">
               <label>Descrição</label>
               <input value={transacaoForm.descricao} onChange={(e) => setTransacaoForm({ ...transacaoForm, descricao: e.target.value })} placeholder="Ex: Produção Coprel Julho" />
