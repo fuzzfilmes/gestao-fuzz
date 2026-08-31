@@ -1757,7 +1757,7 @@ export default function App() {
       natureza: "Fixa",
       valor: String(valor),
       data: mes + "-05",
-      statusPagamento: "Pago",
+      statusPagamento: existente ? existente.statusPagamento : "Pendente",
     };
     const list = existente
       ? transacoesRef.current.map((t) => (t.id === id ? { ...t, ...dados } : t))
