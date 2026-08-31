@@ -2876,7 +2876,7 @@ export default function App() {
   }
 
   function computeSaudeFinanceira(statsMes, saldoAcum, ultimosMesesArr) {
-    const faturado = statsMes.recebido;
+    const faturado = statsMes.totalReceita;
     const despesasOperacionais = statsMes.totalDespesas;
     const impostoValor = (faturado * (parseFloat(parametrosFinanceiros.pctImposto) || 0)) / 100;
     const reservaValor = (faturado * (parseFloat(parametrosFinanceiros.pctReserva) || 0)) / 100;
