@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank, Minus } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -12,19 +12,19 @@ function loadXLSX() {
   return xlsxModulePromise;
 }
 
-const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy"];
-const STATUS_APROVACAO = ["Não enviado", "Aguardando", "Aprovado", "Alteração solicitada"];
 const VIDEO_STATUS = ["Não iniciado", "Em andamento", "Enviado para aprovação", "Aguardando aprovação", "Alteração solicitada", "Standby", "Aprovado"];
 
+const DEFAULT_STATUS_DEMANDAS = [
+  { nome: "Não iniciada", cor: "#8a8f98" },
+  { nome: "Em andamento", cor: "#4FA8A0" },
+  { nome: "Enviado para aprovação", cor: "#5B9BD9" },
+  { nome: "Aguardando aprovação", cor: "#D9A441" },
+  { nome: "Alteração solicitada", cor: "#E2574C" },
+  { nome: "Standby", cor: "#9B87C4" },
+  { nome: "Finalizada", cor: "#6FBF73" },
+];
+
 const DEFAULT_CORES_STATUS = {
-  "producao:Não iniciada": "#8a8f98",
-  "producao:Em andamento": "#4FA8A0",
-  "producao:Finalizada": "#6FBF73",
-  "producao:StandBy": "#9B87C4",
-  "aprovacao:Não enviado": "#8a8f98",
-  "aprovacao:Aguardando": "#D9A441",
-  "aprovacao:Aprovado": "#6FBF73",
-  "aprovacao:Alteração solicitada": "#E2574C",
   "video:Não iniciado": "#8a8f98",
   "video:Em andamento": "#4FA8A0",
   "video:Enviado para aprovação": "#5B9BD9",
@@ -70,17 +70,6 @@ const emptyTag = (nome, cor) => ({
   id: "tg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
   nome: nome.trim(),
   cor,
-});
-
-const RESERVA_CORES = ["#4FA8A0", "#D9A441", "#9B87C4", "#6FBF73", "#5B9BD9", "#E07BB5"];
-
-const emptyReserva = () => ({
-  id: "res_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-  nome: "",
-  valorAlvo: "",
-  valorAtual: "0",
-  cor: RESERVA_CORES[0],
-  criadoEm: todayISO(),
 });
 
 const DEFAULT_CATEGORIAS_EQUIP = ["Câmeras", "Lentes", "Áudio", "Iluminação", "Drones", "Acessórios", "Informática", "Outro"];
@@ -283,8 +272,7 @@ const emptyDemand = () => ({
   clienteId: "",
   tipo: DEFAULT_TIPOS[0],
   editor: "",
-  statusProducao: STATUS_PRODUCAO[0],
-  statusAprovacao: STATUS_APROVACAO[0],
+  status: DEFAULT_STATUS_DEMANDAS[0].nome,
   dataEntrega: "",
   dataEnvioAprovacao: "",
   dataAprovacao: "",
@@ -328,11 +316,11 @@ function todayISO() {
 }
 
 function getUrgencia(d) {
-  if (d.statusProducao === "Finalizada") return { label: "Concluído", tone: "done" };
-  if (d.statusProducao === "StandBy") return { label: "StandBy", tone: "standby" };
+  if (d.status === "Finalizada") return { label: "Concluído", tone: "done" };
+  if (d.status === "Standby") return { label: "StandBy", tone: "standby" };
   const itens = d.itens || [];
   const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.status === "Aguardando aprovação");
-  if (d.statusAprovacao === "Aguardando" || todosVideosAguardandoCliente) return { label: "Aguardando cliente", tone: "wait" };
+  if (d.status === "Aguardando aprovação" || todosVideosAguardandoCliente) return { label: "Aguardando cliente", tone: "wait" };
   if (!d.dataEntrega) return { label: "Sem prazo", tone: "neutral" };
   const today = new Date(todayISO() + "T00:00:00");
   const entrega = new Date(d.dataEntrega + "T00:00:00");
@@ -1210,10 +1198,8 @@ export default function App() {
   const [tiposReceita, setTiposReceita] = useState(DEFAULT_TIPOS_RECEITA);
   const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
   const [coresStatus, setCoresStatus] = useState({});
+  const [statusDemandas, setStatusDemandas] = useState([]);
   const [kanbanTasks, setKanbanTasks] = useState([]);
-  const [reservas, setReservas] = useState([]);
-  const [reservaForm, setReservaForm] = useState(null);
-  const [reservaAjusteInput, setReservaAjusteInput] = useState({});
   const [quickNoteInput, setQuickNoteInput] = useState("");
   const [demandForm, setDemandForm] = useState(null);
   const [clientForm, setClientForm] = useState(null);
@@ -1222,8 +1208,7 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filterCliente, setFilterCliente] = useState("");
   const [demandTipoFilter, setDemandTipoFilter] = useState("");
-  const [demandStatusProducaoFilter, setDemandStatusProducaoFilter] = useState("");
-  const [demandStatusAprovacaoFilter, setDemandStatusAprovacaoFilter] = useState("");
+  const [demandStatusFilter, setDemandStatusFilter] = useState("");
   const [demandDataInicio, setDemandDataInicio] = useState("");
   const [demandDataFim, setDemandDataFim] = useState("");
   const [draggedDemandId, setDraggedDemandId] = useState(null);
@@ -1247,6 +1232,7 @@ export default function App() {
   const [financeStatusReceitaFilter, setFinanceStatusReceitaFilter] = useState("todos");
   const [financeStatusDespesaFilter, setFinanceStatusDespesaFilter] = useState("todos");
   const [financeCategoriaDespesaFilter, setFinanceCategoriaDespesaFilter] = useState("");
+  const [reservaDestinarInput, setReservaDestinarInput] = useState("");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
   const [financeReceitasSortKey, setFinanceReceitasSortKey] = useState(null);
   const [financeReceitasSortDir, setFinanceReceitasSortDir] = useState("asc");
@@ -1312,6 +1298,9 @@ export default function App() {
   const [novaCategoriaDespesaInput, setNovaCategoriaDespesaInput] = useState("");
   const [categoriaDespesaEditando, setCategoriaDespesaEditando] = useState(null);
   const [categoriaDespesaEditValue, setCategoriaDespesaEditValue] = useState("");
+  const [novoStatusDemandaInput, setNovoStatusDemandaInput] = useState("");
+  const [statusDemandaEditando, setStatusDemandaEditando] = useState(null);
+  const [statusDemandaEditValue, setStatusDemandaEditValue] = useState("");
   const [novaCategoriaEquipInput, setNovaCategoriaEquipInput] = useState("");
   const [categoriaEquipEditando, setCategoriaEquipEditando] = useState(null);
   const [categoriaEquipEditValue, setCategoriaEquipEditValue] = useState("");
@@ -1347,13 +1336,11 @@ export default function App() {
   const proposalsRef = useRef(proposals);
   const transacoesRef = useRef(transacoes);
   const clientViewInfoRef = useRef(clientViewInfo);
-  const reservasRef = useRef(reservas);
   clientsRef.current = clients;
   demandsRef.current = demands;
   proposalsRef.current = proposals;
   transacoesRef.current = transacoes;
   clientViewInfoRef.current = clientViewInfo;
-  reservasRef.current = reservas;
 
   useEffect(() => {
     (async () => {
@@ -1380,8 +1367,13 @@ export default function App() {
           DEFAULT_CATEGORIAS_EQUIP
         ),
         load("cores de status", api.listCoresStatus, setCoresStatus, {}),
+        load(
+          "status de demandas",
+          () => api.seedStatusDemandasSeVazio(DEFAULT_STATUS_DEMANDAS.map((s, i) => ({ id: "sd_" + i, ...s }))),
+          setStatusDemandas,
+          DEFAULT_STATUS_DEMANDAS.map((s, i) => ({ id: "sd_" + i, ...s }))
+        ),
         load("tarefas do kanban", api.listKanbanTasks, setKanbanTasks, []),
-        load("reservas", api.listReservas, setReservas, []),
         load("metas", api.listMetasMensais, setMetas, {}),
         load("metas anuais", api.listMetasAnuais, setMetasAnuais, {}),
         load("meta de clientes", api.listMetasClientesMensais, setMetasClientesNovos, {}),
@@ -1764,6 +1756,41 @@ export default function App() {
     }
   }
 
+  async function persistStatusDemandas(list) {
+    const prev = statusDemandas;
+    setStatusDemandas(list);
+    try {
+      await api.syncStatusDemandas(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar status de demandas", e);
+    }
+  }
+
+  function createStatusDemanda(nome, cor) {
+    const limpo = nome.trim();
+    if (!limpo) return null;
+    const existente = statusDemandas.find((s) => s.nome.toLowerCase() === limpo.toLowerCase());
+    if (existente) return existente;
+    const novo = { id: "sd_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: limpo, cor: cor || TAG_COLORS[statusDemandas.length % TAG_COLORS.length] };
+    persistStatusDemandas([...statusDemandas, novo]);
+    return novo;
+  }
+
+  function deleteStatusDemanda(id) {
+    persistStatusDemandas(statusDemandas.filter((s) => s.id !== id));
+  }
+
+  function renameStatusDemanda(id, novoNome, novaCor) {
+    const limpo = novoNome.trim();
+    if (!limpo) return;
+    const atual = statusDemandas.find((s) => s.id === id);
+    if (!atual) return;
+    persistStatusDemandas(statusDemandas.map((s) => (s.id === id ? { ...s, nome: limpo, cor: novaCor || s.cor } : s)));
+    if (atual.nome !== limpo && demandsRef.current.some((d) => d.status === atual.nome)) {
+      persistDemands(demandsRef.current.map((d) => (d.status === atual.nome ? { ...d, status: limpo } : d)));
+    }
+  }
+
   useEffect(() => {
     if (!openFilterMenu) return;
     function onDocClick() {
@@ -1932,33 +1959,20 @@ export default function App() {
     persistKanbanTasks(kanbanTasks.map((t) => (t.id === id ? { ...t, data: novaData } : t)));
   }
 
-  async function persistReservas(list) {
-    const prev = reservasRef.current;
-    reservasRef.current = list;
-    setReservas(list);
-    try {
-      await api.syncReservas(prev, list);
-    } catch (e) {
-      console.error("Falha ao salvar reservas", e);
-    }
-  }
-
-  function saveReserva(r) {
-    const exists = reservasRef.current.some((x) => x.id === r.id);
-    const list = exists ? reservasRef.current.map((x) => (x.id === r.id ? r : x)) : [r, ...reservasRef.current];
-    persistReservas(list);
-    setReservaForm(null);
-  }
-
-  function deleteReserva(id) {
-    persistReservas(reservasRef.current.filter((r) => r.id !== id));
-    setConfirmDelete(null);
-  }
-
-  function ajustarReserva(id, delta) {
-    persistReservas(
-      reservasRef.current.map((r) => (r.id === id ? { ...r, valorAtual: Math.max(0, (parseFloat(r.valorAtual) || 0) + delta) } : r))
-    );
+  function destinarReserva(valor) {
+    const v = parseFloat(valor);
+    if (!v || v <= 0) return;
+    if (!tags.some((tg) => tg.nome === "Reserva")) createTag("Reserva", "#4FA8A0");
+    const nova = {
+      ...emptyTransacao("Despesa"),
+      descricao: "Reserva da empresa",
+      categoria: "Reserva",
+      natureza: "Variável",
+      valor: String(v),
+      data: todayISO(),
+      statusPagamento: "Pago",
+    };
+    persistTransacoes([nova, ...transacoesRef.current]);
   }
 
   function toggleExpandDemand(id) {
@@ -1981,8 +1995,7 @@ export default function App() {
     const list = demandsRef.current.map((d) => {
       if (d.id !== demandId) return d;
       const atualizado = { ...d, [field]: value };
-      if (field === "statusAprovacao" && value === "Aprovado") {
-        atualizado.statusProducao = "Finalizada";
+      if (field === "status" && value === "Finalizada") {
         atualizado.dataAprovacao = atualizado.dataAprovacao || todayISO();
       }
       return atualizado;
@@ -2327,14 +2340,14 @@ export default function App() {
   }, [googleToken, googleCalendarId]);
 
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
+  const corStatusDemanda = (nome) => statusDemandas.find((s) => s.nome === nome)?.cor || "#8a8f98";
 
   const filteredDemands = useMemo(() => {
     const list = demands.filter((d) => {
-      if (!mostrarFinalizadas && d.statusProducao === "Finalizada") return false;
+      if (!mostrarFinalizadas && d.status === "Finalizada") return false;
       if (filterCliente && d.clienteId !== filterCliente) return false;
       if (demandTipoFilter && d.tipo !== demandTipoFilter) return false;
-      if (demandStatusProducaoFilter && d.statusProducao !== demandStatusProducaoFilter) return false;
-      if (demandStatusAprovacaoFilter && d.statusAprovacao !== demandStatusAprovacaoFilter) return false;
+      if (demandStatusFilter && d.status !== demandStatusFilter) return false;
       if (demandDataInicio && (!d.dataEntrega || d.dataEntrega < demandDataInicio)) return false;
       if (demandDataFim && (!d.dataEntrega || d.dataEntrega > demandDataFim)) return false;
       if (search && !d.projeto.toLowerCase().includes(search.toLowerCase())) return false;
@@ -2347,8 +2360,7 @@ export default function App() {
       switch (demandSortKey) {
         case "projeto": return d.projeto || "";
         case "cliente": return clientName(d.clienteId);
-        case "producao": return d.statusProducao || "";
-        case "aprovacao": return d.statusAprovacao || "";
+        case "status": return d.status || "";
         case "urgencia": return getUrgencia(d).label;
         case "entrega": return d.dataEntrega || "";
         default: return "";
@@ -2356,7 +2368,7 @@ export default function App() {
     };
     const dir = demandSortDir === "asc" ? 1 : -1;
     return list.sort((a, b) => getValor(a).localeCompare(getValor(b), "pt-BR", { numeric: true }) * dir);
-  }, [demands, filterCliente, demandTipoFilter, demandStatusProducaoFilter, demandStatusAprovacaoFilter, demandDataInicio, demandDataFim, search, mostrarFinalizadas, demandSortKey, demandSortDir]);
+  }, [demands, filterCliente, demandTipoFilter, demandStatusFilter, demandDataInicio, demandDataFim, search, mostrarFinalizadas, demandSortKey, demandSortDir]);
 
   const filteredProposals = useMemo(() => {
     let list = proposals.filter((p) => {
@@ -2413,14 +2425,14 @@ export default function App() {
     const set = new Set();
     demands.forEach((d) => {
       const prazoNoMes = mesRef(d.dataEntrega) === relatorioMes;
-      const entregueNoMes = d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === relatorioMes;
+      const entregueNoMes = d.status === "Finalizada" && mesRef(d.dataAprovacao) === relatorioMes;
       if (prazoNoMes || entregueNoMes) set.add(d);
     });
     return Array.from(set);
   }, [demands, relatorioMes]);
 
   const relatorioEntregasDoMes = useMemo(
-    () => relatorioDemandasDoMes.filter((d) => d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === relatorioMes),
+    () => relatorioDemandasDoMes.filter((d) => d.status === "Finalizada" && mesRef(d.dataAprovacao) === relatorioMes),
     [relatorioDemandasDoMes, relatorioMes]
   );
 
@@ -2444,7 +2456,7 @@ export default function App() {
 
   const stats = useMemo(() => {
     const somar = (lista) => lista.reduce((s, d) => s + demandaPeso(d), 0);
-    const emAndamento = somar(demands.filter((d) => d.statusProducao === "Em andamento"));
+    const emAndamento = somar(demands.filter((d) => d.status === "Em andamento"));
     const atrasado = somar(demands.filter((d) => getUrgencia(d).tone === "late"));
     const aguardando = somar(demands.filter((d) => getUrgencia(d).tone === "wait"));
     return { emAndamento, atrasado, aguardando };
@@ -2455,7 +2467,7 @@ export default function App() {
     let finalizadas = 0;
     demands.forEach((d) => {
       const prazoNoMes = mesRef(d.dataEntrega) === monthAnchor;
-      const entregueNoMes = d.statusProducao === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
+      const entregueNoMes = d.status === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
       if (prazoNoMes || entregueNoMes) doMes.add(d);
       if (entregueNoMes) finalizadas += demandaPeso(d);
     });
@@ -2495,7 +2507,7 @@ export default function App() {
         label: "Ver demandas",
       });
     }
-    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.statusProducao !== "Finalizada");
+    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.status !== "Finalizada");
     if (demandasHoje.length > 0) {
       list.push({
         id: "demandas-hoje",
@@ -2807,6 +2819,17 @@ export default function App() {
   const saldoAcumulado = useMemo(() => computeSaldoAcumulado(monthAnchor), [transacoes, monthAnchor]);
   const relatorioSaldoAcumulado = useMemo(() => computeSaldoAcumulado(relatorioMes), [transacoes, relatorioMes]);
 
+  function computeReservaAcumulada(ateMes) {
+    const num = (v) => parseFloat(v) || 0;
+    return transacoes.reduce((acc, t) => {
+      if (t.tipo !== "Despesa" || t.categoria !== "Reserva" || t.statusPagamento !== "Pago") return acc;
+      if (mesRef(t.data) > ateMes) return acc;
+      return acc + num(t.valor);
+    }, 0);
+  }
+  const reservaAcumulada = useMemo(() => computeReservaAcumulada(monthAnchor), [transacoes, monthAnchor]);
+  const relatorioReservaAcumulada = useMemo(() => computeReservaAcumulada(relatorioMes), [transacoes, relatorioMes]);
+
   function computeSaudeFinanceira(statsMes, saldoAcum, ultimosMesesArr) {
     const faturado = statsMes.totalReceita;
     const despesasOperacionais = statsMes.totalDespesas;
@@ -3079,14 +3102,8 @@ export default function App() {
         .gauge-sublabel { fill: var(--text-dim); font-size: 9px; }
         .gauge-label { font-size: 11.5px; color: var(--text-dim); text-align: center; }
         .metas-line b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
-        .reservas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; align-items: start; }
-        .reserva-card { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; backdrop-filter: blur(8px); text-align: center; }
-        .reserva-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; text-align: left; }
-        .reserva-card-head h4 { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.4px; margin: 0; }
-        .reserva-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
-        .reserva-valor-simples { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; padding: 20px 0; }
-        .reserva-ajuste-row { display: flex; gap: 6px; margin-top: 14px; }
-        .reserva-ajuste-row input { flex: 1; min-width: 0; }
+        .reserva-destinar-row { display: flex; gap: 6px; margin-top: 12px; }
+        .reserva-destinar-row input { flex: 1; min-width: 0; }
         .kanban-inbox-bar {
           display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 14px;
           background: rgba(217,164,65,0.06); border: 1px dashed var(--amber); border-radius: 12px;
@@ -3471,9 +3488,6 @@ export default function App() {
           <button className={"rail-btn " + (tab === "metas" ? "active" : "")} onClick={() => setTab("metas")}>
             <Target size={16} /> <span className="rail-label">Metas</span>
           </button>
-          <button className={"rail-btn " + (tab === "reservas" ? "active" : "")} onClick={() => setTab("reservas")}>
-            <PiggyBank size={16} /> <span className="rail-label">Reservas</span>
-          </button>
           <button className={"rail-btn " + (tab === "relatorios" ? "active" : "")} onClick={() => setTab("relatorios")}>
             <TrendingUp size={16} /> <span className="rail-label">Relatórios</span>
           </button>
@@ -3741,7 +3755,7 @@ export default function App() {
                   id="demandas"
                   openId={openFilterMenu}
                   setOpenId={setOpenFilterMenu}
-                  activeCount={[filterCliente, demandTipoFilter, demandStatusProducaoFilter, demandStatusAprovacaoFilter, demandDataInicio, demandDataFim].filter(Boolean).length}
+                  activeCount={[filterCliente, demandTipoFilter, demandStatusFilter, demandDataInicio, demandDataFim].filter(Boolean).length}
                 >
                   <div className="filter-menu-field">
                     <label>Cliente</label>
@@ -3760,17 +3774,10 @@ export default function App() {
                     </select>
                   </div>
                   <div className="filter-menu-field">
-                    <label>Produção</label>
-                    <select value={demandStatusProducaoFilter} onChange={(e) => setDemandStatusProducaoFilter(e.target.value)}>
-                      <option value="">Toda produção</option>
-                      {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div className="filter-menu-field">
-                    <label>Aprovação</label>
-                    <select value={demandStatusAprovacaoFilter} onChange={(e) => setDemandStatusAprovacaoFilter(e.target.value)}>
-                      <option value="">Toda aprovação</option>
-                      {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                    <label>Status</label>
+                    <select value={demandStatusFilter} onChange={(e) => setDemandStatusFilter(e.target.value)}>
+                      <option value="">Todos os status</option>
+                      {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
                     </select>
                   </div>
                   <div className="filter-menu-row">
@@ -3783,10 +3790,10 @@ export default function App() {
                       <input type="date" value={demandDataFim} onChange={(e) => setDemandDataFim(e.target.value)} />
                     </div>
                   </div>
-                  {(filterCliente || demandTipoFilter || demandStatusProducaoFilter || demandStatusAprovacaoFilter || demandDataInicio || demandDataFim) && (
+                  {(filterCliente || demandTipoFilter || demandStatusFilter || demandDataInicio || demandDataFim) && (
                     <button
                       className="filter-menu-clear"
-                      onClick={() => { setFilterCliente(""); setDemandTipoFilter(""); setDemandStatusProducaoFilter(""); setDemandStatusAprovacaoFilter(""); setDemandDataInicio(""); setDemandDataFim(""); }}
+                      onClick={() => { setFilterCliente(""); setDemandTipoFilter(""); setDemandStatusFilter(""); setDemandDataInicio(""); setDemandDataFim(""); }}
                     >
                       Limpar filtros
                     </button>
@@ -3819,11 +3826,8 @@ export default function App() {
                       <th className="sortable-th" onClick={() => toggleDemandSort("cliente")}>
                         Cliente {demandSortKey === "cliente" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
                       </th>
-                      <th className="sortable-th" onClick={() => toggleDemandSort("producao")}>
-                        Produção {demandSortKey === "producao" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
-                      </th>
-                      <th className="sortable-th" onClick={() => toggleDemandSort("aprovacao")}>
-                        Aprovação {demandSortKey === "aprovacao" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
+                      <th className="sortable-th" onClick={() => toggleDemandSort("status")}>
+                        Status {demandSortKey === "status" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
                       </th>
                       <th className="sortable-th" onClick={() => toggleDemandSort("urgencia")}>
                         Urgência {demandSortKey === "urgencia" ? (demandSortDir === "asc" ? "▲" : "▼") : ""}
@@ -3873,21 +3877,11 @@ export default function App() {
                             <td onClick={(e) => e.stopPropagation()}>
                               <select
                                 className="demand-status-select"
-                                value={d.statusProducao}
-                                onChange={(e) => updateDemandField(d.id, "statusProducao", e.target.value)}
-                                style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "producao", d.statusProducao) }}
+                                value={d.status}
+                                onChange={(e) => updateDemandField(d.id, "status", e.target.value)}
+                                style={{ borderLeft: "3px solid " + corStatusDemanda(d.status) }}
                               >
-                                {STATUS_PRODUCAO.filter((s) => s !== "Finalizada" || s === d.statusProducao).map((s) => <option key={s} value={s}>{s}</option>)}
-                              </select>
-                            </td>
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <select
-                                className="demand-status-select"
-                                value={d.statusAprovacao}
-                                onChange={(e) => updateDemandField(d.id, "statusAprovacao", e.target.value)}
-                                style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "aprovacao", d.statusAprovacao) }}
-                              >
-                                {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                                {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
                               </select>
                             </td>
                             <td><span className={"badge " + TONE_CLASS[urg.tone]}>{urg.label}</span></td>
@@ -4173,8 +4167,8 @@ export default function App() {
                     <div className="n">R$ {financeStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">despesas do mês</div>
                   </div>
                   <div className="stat">
-                    <div className="stat-icon-sq brand"><TrendingUp size={16} /></div>
-                    <div className="n">R$ {financeStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">margem do mês</div>
+                    <div className="stat-icon-sq brand"><PiggyBank size={16} /></div>
+                    <div className="n">R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">reserva da empresa</div>
                   </div>
                 </div>
                 {(parseFloat(metas[monthAnchor]) || 0) > 0 && (
@@ -4435,6 +4429,21 @@ export default function App() {
                     <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {saudeFinanceiraMes.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Pró-labore</span><b>- R$ {saudeFinanceiraMes.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Reserva/investimento ({parametrosFinanceiros.pctReserva || 0}%)</span><b>- R$ {saudeFinanceiraMes.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="reserva-destinar-row">
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder={"Sugestão: " + saudeFinanceiraMes.reservaValor.toFixed(2)}
+                        value={reservaDestinarInput}
+                        onChange={(e) => setReservaDestinarInput(e.target.value)}
+                      />
+                      <button
+                        className="btn-ghost"
+                        onClick={() => { destinarReserva(reservaDestinarInput || saudeFinanceiraMes.reservaValor); setReservaDestinarInput(""); }}
+                      >
+                        Destinar à reserva
+                      </button>
+                    </div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
                       <b style={{ color: saudeFinanceiraMes.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
@@ -4463,26 +4472,16 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {reservas.length > 0 && (
-                    <div className="metas-card">
-                      <h4>Reservas e poupanças</h4>
-                      <div className="metas-line" style={{ borderBottom: "1px solid var(--border)", marginBottom: 6, paddingBottom: 10 }}>
-                        <span>Total guardado</span>
-                        <b>R$ {reservas.reduce((s, r) => s + (parseFloat(r.valorAtual) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-                      </div>
-                      {reservas.map((r) => {
-                        const atual = parseFloat(r.valorAtual) || 0;
-                        const alvo = parseFloat(r.valorAlvo) || 0;
-                        return (
-                          <div className="metas-line" key={r.id}>
-                            <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: r.cor, marginRight: 6 }} />{r.nome}</span>
-                            <b>R$ {atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}{alvo > 0 ? " / R$ " + alvo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""}</b>
-                          </div>
-                        );
-                      })}
-                      <button className="btn-ghost" style={{ marginTop: 10, width: "100%" }} onClick={() => setTab("reservas")}>Gerenciar reservas</button>
+                  <div className="metas-card">
+                    <h4>Reserva da empresa</h4>
+                    <div className="metas-line">
+                      <span>Total destinado até {mesLabel(monthAnchor)}</span>
+                      <b>R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
-                  )}
+                    <p className="config-hint" style={{ marginTop: 10 }}>
+                      Soma de todas as despesas pagas categorizadas como "Reserva". Destine um valor na Distribuição do faturamento, ao lado.
+                    </p>
+                  </div>
                 </div>
               </div>
             </>
@@ -4581,90 +4580,6 @@ export default function App() {
                   </div>
                 );
               })()}
-            </>
-          ) : tab === "reservas" ? (
-            <>
-              <div className="toolbar">
-                <div />
-                <button className="btn-primary" onClick={() => setReservaForm(emptyReserva())}>
-                  <Plus size={15} /> Nova reserva
-                </button>
-              </div>
-
-              {reservas.length === 0 ? (
-                <div className="empty" style={{ padding: "40px 0" }}>
-                  Nenhuma reserva criada ainda. Crie reservas pra objetivos como reserva de emergência, equipamentos, impostos, etc.
-                </div>
-              ) : (
-                <div className="reservas-grid">
-                  {reservas.map((r) => {
-                    const atual = parseFloat(r.valorAtual) || 0;
-                    const alvo = parseFloat(r.valorAlvo) || 0;
-                    const pct = alvo > 0 ? Math.min(999, (atual / alvo) * 100) : 0;
-                    const ajusteVal = reservaAjusteInput[r.id] || "";
-                    return (
-                      <div className="reserva-card" key={r.id} style={{ borderTop: "3px solid " + r.cor }}>
-                        <div className="reserva-card-head">
-                          <h4>{r.nome}</h4>
-                          <div className="reserva-card-actions">
-                            <button className="icon-btn" title="Editar" onClick={() => setReservaForm(r)}><Pencil size={14} /></button>
-                            <button className="icon-btn" title="Excluir" onClick={() => setConfirmDelete({ type: "reserva", id: r.id, label: r.nome })}><Trash2 size={14} /></button>
-                          </div>
-                        </div>
-
-                        {alvo > 0 ? (
-                          <GoalGauge pct={pct} size={112} />
-                        ) : (
-                          <div className="reserva-valor-simples">R$ {atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
-                        )}
-
-                        <div style={{ marginTop: 12 }}>
-                          <div className="metas-line"><span>Valor atual</span><b>R$ {atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
-                          {alvo > 0 && (
-                            <>
-                              <div className="metas-line"><span>Meta</span><b>R$ {alvo.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
-                              <div className="metas-line"><span>Falta</span><b>R$ {Math.max(0, alvo - atual).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
-                            </>
-                          )}
-                        </div>
-
-                        <div className="reserva-ajuste-row">
-                          <input
-                            type="number"
-                            placeholder="Valor"
-                            value={ajusteVal}
-                            onChange={(e) => setReservaAjusteInput({ ...reservaAjusteInput, [r.id]: e.target.value })}
-                          />
-                          <button
-                            className="icon-btn"
-                            title="Adicionar"
-                            onClick={() => {
-                              const v = parseFloat(ajusteVal) || 0;
-                              if (v <= 0) return;
-                              ajustarReserva(r.id, v);
-                              setReservaAjusteInput({ ...reservaAjusteInput, [r.id]: "" });
-                            }}
-                          >
-                            <Plus size={14} />
-                          </button>
-                          <button
-                            className="icon-btn"
-                            title="Retirar"
-                            onClick={() => {
-                              const v = parseFloat(ajusteVal) || 0;
-                              if (v <= 0) return;
-                              ajustarReserva(r.id, -v);
-                              setReservaAjusteInput({ ...reservaAjusteInput, [r.id]: "" });
-                            }}
-                          >
-                            <Minus size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </>
           ) : tab === "equipamentos" ? (
             <>
@@ -4894,21 +4809,13 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {reservas.length > 0 && (
-                    <div className="metas-card">
-                      <h4>Reservas e poupanças</h4>
-                      <div className="metas-line" style={{ borderBottom: "1px solid var(--border)", marginBottom: 6, paddingBottom: 10 }}>
-                        <span>Total guardado</span>
-                        <b>R$ {reservas.reduce((s, r) => s + (parseFloat(r.valorAtual) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-                      </div>
-                      {reservas.map((r) => (
-                        <div className="metas-line" key={r.id}>
-                          <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: r.cor, marginRight: 6 }} />{r.nome}</span>
-                          <b>R$ {(parseFloat(r.valorAtual) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b>
-                        </div>
-                      ))}
+                  <div className="metas-card">
+                    <h4>Reserva da empresa</h4>
+                    <div className="metas-line">
+                      <span>Total destinado até {mesLabel(relatorioMes)}</span>
+                      <b>R$ {relatorioReservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
-                  )}
+                  </div>
                 </div>
                 {relatorioResumoPorCategoria.length > 0 && (
                   <>
@@ -5023,10 +4930,10 @@ export default function App() {
                   <span className="config-card-title">Categorias de equipamentos</span>
                   <span className="config-card-sub">{categoriasEquipamento.length} cadastradas</span>
                 </button>
-                <button className="config-card" onClick={() => setConfigSecaoAtiva("cores")}>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("statusDemandas")}>
                   <LayoutGrid size={20} />
-                  <span className="config-card-title">Cores de status</span>
-                  <span className="config-card-sub">Produção e Aprovação</span>
+                  <span className="config-card-title">Status de demandas</span>
+                  <span className="config-card-sub">{statusDemandas.length} cadastrados</span>
                 </button>
                 <button className="config-card" onClick={() => setConfigSecaoAtiva("metas")}>
                   <Target size={20} />
@@ -5398,60 +5305,65 @@ export default function App() {
             ) : (
               <div className="config-panel">
                 <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
-                <h3 className="config-section-title">Cores de status</h3>
-                <p className="config-hint">Define a cor da bolinha ao lado do status de Produção e Aprovação, na lista de Demandas, e do tipo de produção nas Propostas e Relatórios.</p>
-                <p className="config-hint" style={{ marginTop: 16, fontWeight: 600, color: "var(--text)" }}>Status do vídeo</p>
-                <div className="config-cores-list">
-                  {VIDEO_STATUS.map((s) => (
-                    <div className="config-cor-item" key={"video:" + s}>
-                      <input
-                        type="color"
-                        value={corDoStatusComMapa(coresStatus, "video", s)}
-                        onChange={(e) => setCorStatus("video:" + s, e.target.value)}
-                      />
-                      <span>{s}</span>
+                <h3 className="config-section-title">Status de demandas</h3>
+                <p className="config-hint">Usados no cadastro de Demandas. Renomear atualiza automaticamente as demandas que já usam esse status.</p>
+                <div className="config-tipo-list">
+                  {statusDemandas.map((s) => (
+                    <div className="config-tipo-item" key={s.id}>
+                      {statusDemandaEditando === s.id ? (
+                        <>
+                          <input
+                            type="color"
+                            value={s.cor}
+                            onChange={(e) => renameStatusDemanda(s.id, statusDemandaEditValue, e.target.value)}
+                            style={{ width: 30, height: 30, flexShrink: 0, padding: 0, border: "none", background: "none" }}
+                          />
+                          <input
+                            value={statusDemandaEditValue}
+                            autoFocus
+                            onChange={(e) => setStatusDemandaEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { renameStatusDemanda(s.id, statusDemandaEditValue); setStatusDemandaEditando(null); }
+                              if (e.key === "Escape") setStatusDemandaEditando(null);
+                            }}
+                          />
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { renameStatusDemanda(s.id, statusDemandaEditValue); setStatusDemandaEditando(null); }}><CheckCircle size={13} /></button>
+                            <button className="icon-btn" onClick={() => setStatusDemandaEditando(null)}><X size={13} /></button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: "50%", background: s.cor, flexShrink: 0 }} />
+                            {s.nome}
+                          </span>
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { setStatusDemandaEditando(s.id); setStatusDemandaEditValue(s.nome); }}><Pencil size={13} /></button>
+                            <button className="icon-btn" onClick={() => deleteStatusDemanda(s.id)}><Trash2 size={13} /></button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))}
+                  {statusDemandas.length === 0 && <div className="empty">Nenhum status cadastrado ainda.</div>}
                 </div>
-                <p className="config-hint" style={{ marginTop: 20, fontWeight: 600, color: "var(--text)" }}>Produção</p>
-                <div className="config-cores-list">
-                  {STATUS_PRODUCAO.map((s) => (
-                    <div className="config-cor-item" key={"producao:" + s}>
-                      <input
-                        type="color"
-                        value={corDoStatusComMapa(coresStatus, "producao", s)}
-                        onChange={(e) => setCorStatus("producao:" + s, e.target.value)}
-                      />
-                      <span>{s}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="config-hint" style={{ marginTop: 20, fontWeight: 600, color: "var(--text)" }}>Aprovação</p>
-                <div className="config-cores-list">
-                  {STATUS_APROVACAO.map((s) => (
-                    <div className="config-cor-item" key={"aprovacao:" + s}>
-                      <input
-                        type="color"
-                        value={corDoStatusComMapa(coresStatus, "aprovacao", s)}
-                        onChange={(e) => setCorStatus("aprovacao:" + s, e.target.value)}
-                      />
-                      <span>{s}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="config-hint" style={{ marginTop: 20, fontWeight: 600, color: "var(--text)" }}>Tipo de produção</p>
-                <div className="config-cores-list">
-                  {tiposProducao.map((t) => (
-                    <div className="config-cor-item" key={"tipo:" + t}>
-                      <input
-                        type="color"
-                        value={corDoStatusComMapa(coresStatus, "tipo", t)}
-                        onChange={(e) => setCorStatus("tipo:" + t, e.target.value)}
-                      />
-                      <span>{t}</span>
-                    </div>
-                  ))}
-                  {tiposProducao.length === 0 && <div className="empty">Nenhum tipo cadastrado ainda.</div>}
+                <div className="config-add-row">
+                  <input
+                    value={novoStatusDemandaInput}
+                    onChange={(e) => setNovoStatusDemandaInput(e.target.value)}
+                    placeholder="Novo status de demanda…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { createStatusDemanda(novoStatusDemandaInput); setNovoStatusDemandaInput(""); }
+                    }}
+                  />
+                  <button
+                    className="btn-primary"
+                    style={{ marginLeft: 0 }}
+                    onClick={() => { createStatusDemanda(novoStatusDemandaInput); setNovoStatusDemandaInput(""); }}
+                  >
+                    <Plus size={15} /> Adicionar
+                  </button>
                 </div>
               </div>
             )
@@ -5666,30 +5578,22 @@ export default function App() {
                 </select>
               </div>
             </div>
-            <div className="grid2">
-              <div className="field">
-                <label>Status produção</label>
-                <select value={demandForm.statusProducao} onChange={(e) => setDemandForm({ ...demandForm, statusProducao: e.target.value })}>
-                  {STATUS_PRODUCAO.filter((s) => s !== "Finalizada" || s === demandForm.statusProducao).map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label>Status aprovação</label>
-                <select
-                  value={demandForm.statusAprovacao}
-                  onChange={(e) => {
-                    const novoValor = e.target.value;
-                    setDemandForm({
-                      ...demandForm,
-                      statusAprovacao: novoValor,
-                      statusProducao: novoValor === "Aprovado" ? "Finalizada" : demandForm.statusProducao,
-                      dataAprovacao: novoValor === "Aprovado" ? demandForm.dataAprovacao || todayISO() : demandForm.dataAprovacao,
-                    });
-                  }}
-                >
-                  {STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+            <div className="field">
+              <label>Status</label>
+              <select
+                value={demandForm.status}
+                onChange={(e) => {
+                  const novoValor = e.target.value;
+                  setDemandForm({
+                    ...demandForm,
+                    status: novoValor,
+                    dataAprovacao: novoValor === "Finalizada" ? demandForm.dataAprovacao || todayISO() : demandForm.dataAprovacao,
+                  });
+                }}
+                style={{ borderLeft: "3px solid " + corStatusDemanda(demandForm.status) }}
+              >
+                {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
+              </select>
             </div>
             <div className="field">
               <label>Editor</label>
@@ -6079,63 +5983,6 @@ export default function App() {
         </div>
       )}
 
-      {reservaForm && (
-        <div className="overlay" onClick={() => setReservaForm(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>
-              {reservas.some((r) => r.id === reservaForm.id) ? "Editar reserva" : "Nova reserva"}
-              <button className="icon-btn" onClick={() => setReservaForm(null)}><X size={15} /></button>
-            </h3>
-            <div className="field">
-              <label>Nome da reserva</label>
-              <input
-                type="text"
-                placeholder="Ex: Reserva de emergência, Troca de câmera…"
-                value={reservaForm.nome}
-                onChange={(e) => setReservaForm({ ...reservaForm, nome: e.target.value })}
-              />
-            </div>
-            <div className="grid2">
-              <div className="field">
-                <label>Valor alvo (R$) — opcional</label>
-                <input type="number" step="0.01" value={reservaForm.valorAlvo} onChange={(e) => setReservaForm({ ...reservaForm, valorAlvo: e.target.value })} />
-              </div>
-              <div className="field">
-                <label>Valor atual (R$)</label>
-                <input type="number" step="0.01" value={reservaForm.valorAtual} onChange={(e) => setReservaForm({ ...reservaForm, valorAtual: e.target.value })} />
-              </div>
-            </div>
-            <div className="field">
-              <label>Cor</label>
-              <div className="config-cores-list">
-                {RESERVA_CORES.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setReservaForm({ ...reservaForm, cor: c })}
-                    style={{
-                      width: 26, height: 26, borderRadius: "50%", background: c, border: reservaForm.cor === c ? "2px solid var(--text)" : "2px solid transparent", cursor: "pointer", padding: 0,
-                    }}
-                  />
-                ))}
-                <input type="color" value={reservaForm.cor} onChange={(e) => setReservaForm({ ...reservaForm, cor: e.target.value })} />
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button className="btn-ghost" onClick={() => setReservaForm(null)}>Cancelar</button>
-              <button
-                className="btn-primary"
-                style={{ marginLeft: 0 }}
-                disabled={!reservaForm.nome.trim()}
-                onClick={() => saveReserva({ ...reservaForm, nome: reservaForm.nome.trim() })}
-              >
-                Salvar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {processoForm && (
         <div className="overlay" onClick={() => { setProcessoForm(null); setProcessoNovoArquivo(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -6219,7 +6066,6 @@ export default function App() {
                   else if (confirmDelete.type === "equipamento") removeEquipamento(confirmDelete.id);
                   else if (confirmDelete.type === "processo") removeProcessoDocumento(confirmDelete.doc);
                   else if (confirmDelete.type === "proposta") removeProposal(confirmDelete.id);
-                  else if (confirmDelete.type === "reserva") deleteReserva(confirmDelete.id);
                   else removeClient(confirmDelete.id);
                 }}
               >

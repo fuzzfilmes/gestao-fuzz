@@ -105,8 +105,7 @@ function demandaToRow(d) {
     cliente_id: n(d.clienteId),
     tipo: d.tipo || "",
     editor: d.editor || "",
-    status_producao: d.statusProducao || "",
-    status_aprovacao: d.statusAprovacao || "",
+    status: d.status || "",
     data_entrega: n(d.dataEntrega),
     data_envio_aprovacao: n(d.dataEnvioAprovacao),
     data_aprovacao: n(d.dataAprovacao),
@@ -132,8 +131,7 @@ function demandaFromRow(r, itensByDemanda) {
     clienteId: r.cliente_id || "",
     tipo: r.tipo,
     editor: r.editor,
-    statusProducao: r.status_producao,
-    statusAprovacao: r.status_aprovacao,
+    status: r.status || "",
     dataEntrega: r.data_entrega || "",
     dataEnvioAprovacao: r.data_envio_aprovacao || "",
     dataAprovacao: r.data_aprovacao || "",
@@ -492,35 +490,38 @@ export const syncMetasAnuais = (prev, next) => syncMetas("metas_anuais", "ano", 
 export const syncMetasClientesMensais = (prev, next) =>
   syncMetas("metas_clientes_mensais", "mes", prev, next, (v) => intOrNull(v) ?? 0);
 
-// ---------------- Reservas e poupanças ----------------
+// ---------------- Status de demandas ----------------
 
-function reservaToRow(r) {
+function statusDemandaToRow(s) {
   return {
-    id: r.id,
-    nome: r.nome || "",
-    valor_alvo: num(r.valorAlvo),
-    valor_atual: num(r.valorAtual),
-    cor: r.cor || "#4FA8A0",
-    criado_em: n(r.criadoEm),
+    id: s.id,
+    nome: s.nome || "",
+    cor: s.cor || "#8a8f98",
+    ordem: Number.isFinite(s.ordem) ? s.ordem : 0,
   };
 }
-function reservaFromRow(r) {
+function statusDemandaFromRow(r) {
   return {
     id: r.id,
     nome: r.nome,
-    valorAlvo: Number(r.valor_alvo) || 0,
-    valorAtual: Number(r.valor_atual) || 0,
     cor: r.cor,
-    criadoEm: r.criado_em || "",
+    ordem: r.ordem || 0,
   };
 }
-export async function listReservas() {
-  const res = await supabase.from("reservas").select("*").order("created_at", { ascending: true });
+export async function listStatusDemandas() {
+  const res = await supabase.from("status_demandas").select("*").order("ordem", { ascending: true });
   throwIfError(res);
-  return res.data.map(reservaFromRow);
+  return res.data.map(statusDemandaFromRow);
 }
-export async function syncReservas(prevList, nextList) {
-  return syncRows("reservas", prevList, nextList, reservaToRow);
+export async function seedStatusDemandasSeVazio(defaults) {
+  const atuais = await listStatusDemandas();
+  if (atuais.length) return atuais;
+  const rows = defaults.map((d, i) => statusDemandaToRow({ ...d, ordem: i }));
+  throwIfError(await supabase.from("status_demandas").insert(rows));
+  return defaults.map((d, i) => ({ ...d, ordem: i }));
+}
+export async function syncStatusDemandas(prevList, nextList) {
+  return syncRows("status_demandas", prevList, nextList, statusDemandaToRow);
 }
 
 // ---------------- Parâmetros financeiros (saúde financeira) ----------------
