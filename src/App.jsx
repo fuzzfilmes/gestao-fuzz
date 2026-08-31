@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank, Minus } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -14,6 +14,7 @@ function loadXLSX() {
 
 const STATUS_PRODUCAO = ["Não iniciada", "Em andamento", "Finalizada", "StandBy"];
 const STATUS_APROVACAO = ["Não enviado", "Aguardando", "Aprovado", "Alteração solicitada"];
+const VIDEO_STATUS = ["Não iniciado", "Em andamento", "Enviado para aprovação", "Aguardando aprovação", "Alteração solicitada", "Standby", "Aprovado"];
 
 const DEFAULT_CORES_STATUS = {
   "producao:Não iniciada": "#8a8f98",
@@ -24,6 +25,13 @@ const DEFAULT_CORES_STATUS = {
   "aprovacao:Aguardando": "#D9A441",
   "aprovacao:Aprovado": "#6FBF73",
   "aprovacao:Alteração solicitada": "#E2574C",
+  "video:Não iniciado": "#8a8f98",
+  "video:Em andamento": "#4FA8A0",
+  "video:Enviado para aprovação": "#5B9BD9",
+  "video:Aguardando aprovação": "#D9A441",
+  "video:Alteração solicitada": "#E2574C",
+  "video:Standby": "#9B87C4",
+  "video:Aprovado": "#6FBF73",
 };
 
 function corDoStatusComMapa(mapa, tipo, valor) {
@@ -54,7 +62,6 @@ const TAB_LABELS = {
 const RETENCAO_DIAS = 30;
 
 const CATEGORIAS_RECEITA = ["Produção", "Consultoria", "Outro"];
-const CATEGORIAS_DESPESA = ["Freelancer", "Equipamento", "Software", "Escritório", "Transporte", "Imposto", "Outro"];
 const STATUS_PAGAMENTO = ["Pendente", "Pago"];
 const NATUREZA_DESPESA = ["Variável", "Fixa"];
 const TAG_COLORS = ["#D9A441", "#4FA8A0", "#E2574C", "#9B87C4", "#6FBF73", "#5B9BD9", "#E07BB5", "#B0B4BB"];
@@ -63,6 +70,17 @@ const emptyTag = (nome, cor) => ({
   id: "tg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
   nome: nome.trim(),
   cor,
+});
+
+const RESERVA_CORES = ["#4FA8A0", "#D9A441", "#9B87C4", "#6FBF73", "#5B9BD9", "#E07BB5"];
+
+const emptyReserva = () => ({
+  id: "res_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+  nome: "",
+  valorAlvo: "",
+  valorAtual: "0",
+  cor: RESERVA_CORES[0],
+  criadoEm: todayISO(),
 });
 
 const DEFAULT_CATEGORIAS_EQUIP = ["Câmeras", "Lentes", "Áudio", "Iluminação", "Drones", "Acessórios", "Informática", "Outro"];
@@ -226,7 +244,7 @@ const emptyTransacao = (tipo = "Receita") => ({
   id: "t_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
   tipo,
   descricao: "",
-  categoria: tipo === "Receita" ? CATEGORIAS_RECEITA[0] : CATEGORIAS_DESPESA[0],
+  categoria: tipo === "Receita" ? CATEGORIAS_RECEITA[0] : "",
   tipoReceita: "",
   natureza: "Variável",
   valor: "",
@@ -238,7 +256,6 @@ const emptyTransacao = (tipo = "Receita") => ({
   parcelaGrupoId: "",
   parcelaAtual: null,
   parcelaTotal: null,
-  tags: [],
 });
 
 function getStatusPagamentoEfetivo(t) {
@@ -277,8 +294,7 @@ const emptyDemand = () => ({
   ordem: 0,
 });
 
-const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", statusProducao: STATUS_PRODUCAO[0], statusAprovacao: "Aguardando" });
-const VIDEO_STATUS_APROVACAO = ["Aguardando", "Aprovado", "Alteração solicitada"];
+const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", status: VIDEO_STATUS[0], dataEntrega: "" });
 
 const emptyClient = () => ({
   id: "c_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
@@ -298,6 +314,7 @@ const emptyClient = () => ({
   capaUrl: "",
   observacoes: "",
   criadoEm: todayISO(),
+  rascunho: false,
 });
 
 function fmtDate(iso) {
@@ -314,7 +331,7 @@ function getUrgencia(d) {
   if (d.statusProducao === "Finalizada") return { label: "Concluído", tone: "done" };
   if (d.statusProducao === "StandBy") return { label: "StandBy", tone: "standby" };
   const itens = d.itens || [];
-  const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.statusProducao === "Finalizada" && v.statusAprovacao === "Aguardando");
+  const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.status === "Aguardando aprovação");
   if (d.statusAprovacao === "Aguardando" || todosVideosAguardandoCliente) return { label: "Aguardando cliente", tone: "wait" };
   if (!d.dataEntrega) return { label: "Sem prazo", tone: "neutral" };
   const today = new Date(todayISO() + "T00:00:00");
@@ -338,7 +355,7 @@ const TONE_CLASS = {
 function videoProgress(d) {
   const itens = d.itens || [];
   if (itens.length === 0) return null;
-  const done = itens.filter((v) => v.statusAprovacao === "Aprovado").length;
+  const done = itens.filter((v) => v.status === "Aprovado").length;
   return { done, total: itens.length };
 }
 
@@ -347,13 +364,12 @@ function demandaPeso(d) {
 }
 
 function corStatusVideo(v, coresStatus) {
-  if (v.statusAprovacao === "Aprovado") return corDoStatusComMapa(coresStatus, "aprovacao", "Aprovado");
-  if (v.statusAprovacao === "Alteração solicitada") return corDoStatusComMapa(coresStatus, "aprovacao", "Alteração solicitada");
-  if (v.statusProducao === "Não iniciada") return null;
-  return corDoStatusComMapa(coresStatus, "producao", v.statusProducao);
+  if (v.status === "Não iniciado") return null;
+  return corDoStatusComMapa(coresStatus, "video", v.status);
 }
 
 const FOLLOWUP_DIAS = 7;
+const MESES_RESERVA_IDEAL = 6;
 
 function diasDesde(dataISO) {
   if (!dataISO) return 0;
@@ -482,61 +498,6 @@ function FilterMenu({ id, openId, setOpenId, activeCount = 0, align = "left", ch
   );
 }
 
-function TagPicker({ allTags, selectedIds, onToggle, onCreate, onClose }) {
-  const [search, setSearch] = useState("");
-  const [pickingColor, setPickingColor] = useState(false);
-
-  const matches = allTags.filter((tg) => tg.nome.toLowerCase().includes(search.trim().toLowerCase()));
-  const exact = allTags.some((tg) => tg.nome.toLowerCase() === search.trim().toLowerCase());
-
-  return (
-    <div className="tag-picker" onClick={(e) => e.stopPropagation()}>
-      <input
-        className="tag-picker-search"
-        autoFocus
-        value={search}
-        onChange={(e) => { setSearch(e.target.value); setPickingColor(false); }}
-        placeholder="Buscar ou criar tag…"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-        }}
-      />
-      <div className="tag-picker-list">
-        {matches.map((tg) => (
-          <button
-            key={tg.id}
-            className={"tag-pill tag-pill-btn" + (selectedIds.includes(tg.id) ? " selected" : "")}
-            style={{ "--tag-color": tg.cor }}
-            onClick={() => onToggle(tg.id)}
-          >
-            <span className="tag-dot" style={{ background: tg.cor }} />
-            {tg.nome}
-            {selectedIds.includes(tg.id) && <CheckCircle2 size={11} />}
-          </button>
-        ))}
-        {matches.length === 0 && !search && <div className="tag-picker-empty">Nenhuma tag ainda. Crie a primeira abaixo.</div>}
-      </div>
-      {search.trim() && !exact && (
-        pickingColor ? (
-          <div className="tag-color-row">
-            {TAG_COLORS.map((c) => (
-              <button
-                key={c}
-                className="tag-color-swatch"
-                style={{ background: c }}
-                onClick={() => { const tg = onCreate(search, c); if (tg) onToggle(tg.id); setSearch(""); setPickingColor(false); }}
-              />
-            ))}
-          </div>
-        ) : (
-          <button className="tag-picker-create" onClick={() => setPickingColor(true)}>
-            <Plus size={12} /> Criar tag "{search.trim()}"
-          </button>
-        )
-      )}
-    </div>
-  );
-}
 
 function GoalGauge({ pct, size = 128, label, sublabel }) {
   const stroke = 11;
@@ -1250,6 +1211,9 @@ export default function App() {
   const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
   const [coresStatus, setCoresStatus] = useState({});
   const [kanbanTasks, setKanbanTasks] = useState([]);
+  const [reservas, setReservas] = useState([]);
+  const [reservaForm, setReservaForm] = useState(null);
+  const [reservaAjusteInput, setReservaAjusteInput] = useState({});
   const [quickNoteInput, setQuickNoteInput] = useState("");
   const [demandForm, setDemandForm] = useState(null);
   const [clientForm, setClientForm] = useState(null);
@@ -1271,14 +1235,18 @@ export default function App() {
   const [clientView, setClientView] = useState("grade");
   const [clientViewInfo, setClientViewInfo] = useState(null);
   const [clientArquivos, setClientArquivos] = useState([]);
+  const [mostrarClientesRascunho, setMostrarClientesRascunho] = useState(false);
   const [expandedDemands, setExpandedDemands] = useState(() => new Set());
   const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
+  const [draggedVideoId, setDraggedVideoId] = useState(null);
+  const [mostrarVideosAprovados, setMostrarVideosAprovados] = useState(false);
   const [relatorioMes, setRelatorioMes] = useState(() => mesRef(todayISO()));
   const [relatorioEntregasAberto, setRelatorioEntregasAberto] = useState(false);
   const [relatorioDemandaClienteFiltro, setRelatorioDemandaClienteFiltro] = useState("");
   const [relatorioDemandaTipoFiltro, setRelatorioDemandaTipoFiltro] = useState("");
   const [financeStatusReceitaFilter, setFinanceStatusReceitaFilter] = useState("todos");
   const [financeStatusDespesaFilter, setFinanceStatusDespesaFilter] = useState("todos");
+  const [financeCategoriaDespesaFilter, setFinanceCategoriaDespesaFilter] = useState("");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
   const [financeReceitasSortKey, setFinanceReceitasSortKey] = useState(null);
   const [financeReceitasSortDir, setFinanceReceitasSortDir] = useState("asc");
@@ -1290,10 +1258,7 @@ export default function App() {
   const [metasAnuais, setMetasAnuais] = useState({});
   const [metasClientesNovos, setMetasClientesNovos] = useState({});
   const [tags, setTags] = useState([]);
-  const [tagPopoverFor, setTagPopoverFor] = useState(null);
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
-  const [tagFilterIds, setTagFilterIds] = useState([]);
-  const [tagSearch, setTagSearch] = useState("");
   const [categoriaSearch, setCategoriaSearch] = useState("");
   const [metaInputValue, setMetaInputValue] = useState("");
   const [metaAnualInputValue, setMetaAnualInputValue] = useState("");
@@ -1344,6 +1309,9 @@ export default function App() {
   const [novoTipoReceitaInput, setNovoTipoReceitaInput] = useState("");
   const [tipoReceitaEditando, setTipoReceitaEditando] = useState(null);
   const [tipoReceitaEditValue, setTipoReceitaEditValue] = useState("");
+  const [novaCategoriaDespesaInput, setNovaCategoriaDespesaInput] = useState("");
+  const [categoriaDespesaEditando, setCategoriaDespesaEditando] = useState(null);
+  const [categoriaDespesaEditValue, setCategoriaDespesaEditValue] = useState("");
   const [novaCategoriaEquipInput, setNovaCategoriaEquipInput] = useState("");
   const [categoriaEquipEditando, setCategoriaEquipEditando] = useState(null);
   const [categoriaEquipEditValue, setCategoriaEquipEditValue] = useState("");
@@ -1379,11 +1347,13 @@ export default function App() {
   const proposalsRef = useRef(proposals);
   const transacoesRef = useRef(transacoes);
   const clientViewInfoRef = useRef(clientViewInfo);
+  const reservasRef = useRef(reservas);
   clientsRef.current = clients;
   demandsRef.current = demands;
   proposalsRef.current = proposals;
   transacoesRef.current = transacoes;
   clientViewInfoRef.current = clientViewInfo;
+  reservasRef.current = reservas;
 
   useEffect(() => {
     (async () => {
@@ -1411,6 +1381,7 @@ export default function App() {
         ),
         load("cores de status", api.listCoresStatus, setCoresStatus, {}),
         load("tarefas do kanban", api.listKanbanTasks, setKanbanTasks, []),
+        load("reservas", api.listReservas, setReservas, []),
         load("metas", api.listMetasMensais, setMetas, {}),
         load("metas anuais", api.listMetasAnuais, setMetasAnuais, {}),
         load("meta de clientes", api.listMetasClientesMensais, setMetasClientesNovos, {}),
@@ -1541,6 +1512,7 @@ export default function App() {
           cep: p.cliente.cep || "",
           telefone: p.cliente.telefone || "",
           observacoes: "Cliente criado automaticamente a partir da Proposta nº " + p.numero,
+          rascunho: true,
         };
         clientId = novo.id;
         clientList = [novo, ...currentClients];
@@ -1602,6 +1574,11 @@ export default function App() {
     };
     persistDemands([novaDemanda, ...demandsRef.current]);
     persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Confirmada" } : p)));
+
+    const clienteVinculado = clientsRef.current.find((c) => c.id === prop.clienteId);
+    if (clienteVinculado && clienteVinculado.rascunho) {
+      persistClients(clientsRef.current.map((c) => (c.id === prop.clienteId ? { ...c, rascunho: false } : c)));
+    }
 
     if (prop.valorTotal) {
       const novaReceita = {
@@ -1772,32 +1749,20 @@ export default function App() {
 
   function deleteTag(id) {
     persistTags(tags.filter((tg) => tg.id !== id));
-    persistTransacoes(transacoes.map((t) => (t.tags && t.tags.includes(id) ? { ...t, tags: t.tags.filter((tid) => tid !== id) } : t)));
   }
 
-  function toggleTagOnTransacao(transacaoId, tagId) {
-    persistTransacoes(
-      transacoes.map((t) => {
-        if (t.id !== transacaoId) return t;
-        const atual = t.tags || [];
-        const tem = atual.includes(tagId);
-        return { ...t, tags: tem ? atual.filter((id) => id !== tagId) : [...atual, tagId] };
-      })
-    );
-  }
-
-  function toggleTagFilter(tagId) {
-    setTagFilterIds((prev) => (prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]));
-  }
-
-  useEffect(() => {
-    if (!tagPopoverFor) return;
-    function onDocClick() {
-      setTagPopoverFor(null);
+  function renameTag(id, novoNome, novaCor) {
+    const limpo = novoNome.trim();
+    if (!limpo) return;
+    const atual = tags.find((tg) => tg.id === id);
+    if (!atual) return;
+    persistTags(tags.map((tg) => (tg.id === id ? { ...tg, nome: limpo, cor: novaCor || tg.cor } : tg)));
+    if (atual.nome !== limpo && transacoesRef.current.some((t) => t.tipo === "Despesa" && t.categoria === atual.nome)) {
+      persistTransacoes(
+        transacoesRef.current.map((t) => (t.tipo === "Despesa" && t.categoria === atual.nome ? { ...t, categoria: limpo } : t))
+      );
     }
-    document.addEventListener("click", onDocClick);
-    return () => document.removeEventListener("click", onDocClick);
-  }, [tagPopoverFor]);
+  }
 
   useEffect(() => {
     if (!openFilterMenu) return;
@@ -1967,6 +1932,35 @@ export default function App() {
     persistKanbanTasks(kanbanTasks.map((t) => (t.id === id ? { ...t, data: novaData } : t)));
   }
 
+  async function persistReservas(list) {
+    const prev = reservasRef.current;
+    reservasRef.current = list;
+    setReservas(list);
+    try {
+      await api.syncReservas(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar reservas", e);
+    }
+  }
+
+  function saveReserva(r) {
+    const exists = reservasRef.current.some((x) => x.id === r.id);
+    const list = exists ? reservasRef.current.map((x) => (x.id === r.id ? r : x)) : [r, ...reservasRef.current];
+    persistReservas(list);
+    setReservaForm(null);
+  }
+
+  function deleteReserva(id) {
+    persistReservas(reservasRef.current.filter((r) => r.id !== id));
+    setConfirmDelete(null);
+  }
+
+  function ajustarReserva(id, delta) {
+    persistReservas(
+      reservasRef.current.map((r) => (r.id === id ? { ...r, valorAtual: Math.max(0, (parseFloat(r.valorAtual) || 0) + delta) } : r))
+    );
+  }
+
   function toggleExpandDemand(id) {
     setExpandedDemands((prev) => {
       const next = new Set(prev);
@@ -2053,6 +2047,21 @@ export default function App() {
     atual.splice(toIdx, 0, moved);
     const renumerado = atual.map((d, i) => ({ ...d, ordem: i * 10 }));
     persistDemands(renumerado);
+  }
+
+  function reordenarVideos(demandId, idArrastado, idAlvo) {
+    if (idArrastado === idAlvo) return;
+    const list = demands.map((d) => {
+      if (d.id !== demandId) return d;
+      const itens = [...(d.itens || [])];
+      const fromIdx = itens.findIndex((v) => v.id === idArrastado);
+      const toIdx = itens.findIndex((v) => v.id === idAlvo);
+      if (fromIdx === -1 || toIdx === -1) return d;
+      const [moved] = itens.splice(fromIdx, 1);
+      itens.splice(toIdx, 0, moved);
+      return { ...d, itens: itens.map((v, i) => ({ ...v, ordem: i })) };
+    });
+    persistDemands(list);
   }
 
   function toggleDemandSort(key) {
@@ -2364,7 +2373,7 @@ export default function App() {
     return list;
   }, [proposals, proposalClienteFilter, proposalStatusFilter, proposalValorSort]);
 
-  const relatorioStatsMes = useMemo(() => computeMonthStats(transacoes, relatorioMes), [transacoes, relatorioMes]);
+  const relatorioStatsMes = useMemo(() => computeMonthStats(transacoes, relatorioMes, parametrosFinanceiros.proLabore), [transacoes, relatorioMes, parametrosFinanceiros.proLabore]);
 
   const relatorioReceitasPorTipo = useMemo(() => {
     const num = (v) => parseFloat(v) || 0;
@@ -2529,7 +2538,7 @@ export default function App() {
     return list;
   }, [followUps, demands, transacoes]);
 
-  function computeMonthStats(list, mes) {
+  function computeMonthStats(list, mes, proLabore = 0) {
     const num = (v) => parseFloat(v) || 0;
     const doMes = list.filter((t) => mesRef(t.data) === mes);
     const receitas = doMes.filter((t) => t.tipo === "Receita");
@@ -2539,9 +2548,10 @@ export default function App() {
     const totalDespesas = despesas.reduce((s, t) => s + num(t.valor), 0);
     const despesasFixas = despesas.filter((t) => t.natureza === "Fixa").reduce((s, t) => s + num(t.valor), 0);
     const despesasVariaveis = totalDespesas - despesasFixas;
-    const margem = totalReceita - totalDespesas;
+    const proLaboreValor = num(proLabore);
+    const margem = totalReceita - totalDespesas - proLaboreValor;
     const margemPct = totalReceita > 0 ? (margem / totalReceita) * 100 : 0;
-    return { mes, totalReceita, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasFixas, despesasVariaveis, margem, margemPct };
+    return { mes, totalReceita, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasFixas, despesasVariaveis, proLaboreValor, margem, margemPct };
   }
 
   const financeStats = useMemo(() => {
@@ -2558,13 +2568,15 @@ export default function App() {
     return { totalReceita, recebido, aReceber, totalDespesas, despesasPagas, atrasadas, saldo };
   }, [transacoes]);
 
-  const financeStatsMes = useMemo(() => computeMonthStats(transacoes, monthAnchor), [transacoes, monthAnchor]);
+  const financeStatsMes = useMemo(() => computeMonthStats(transacoes, monthAnchor, parametrosFinanceiros.proLabore), [transacoes, monthAnchor, parametrosFinanceiros.proLabore]);
 
-  const ultimosMeses = useMemo(() => {
+  function computeUltimosMeses(anchorMes) {
     const meses = [];
-    for (let i = 5; i >= 0; i--) meses.push(addMonthsISO(monthAnchor, -i));
-    return meses.map((m) => ({ ...computeMonthStats(transacoes, m), meta: metas[m] || 0 }));
-  }, [transacoes, monthAnchor, metas]);
+    for (let i = 5; i >= 0; i--) meses.push(addMonthsISO(anchorMes, -i));
+    return meses.map((m) => ({ ...computeMonthStats(transacoes, m, parametrosFinanceiros.proLabore), meta: metas[m] || 0 }));
+  }
+  const ultimosMeses = useMemo(() => computeUltimosMeses(monthAnchor), [transacoes, monthAnchor, metas, parametrosFinanceiros.proLabore]);
+  const ultimosMesesRelatorio = useMemo(() => computeUltimosMeses(relatorioMes), [transacoes, relatorioMes, metas, parametrosFinanceiros.proLabore]);
 
   const anoAtual = monthAnchor.slice(0, 4);
   const faturamentoAnual = useMemo(() => {
@@ -2575,7 +2587,7 @@ export default function App() {
   }, [transacoes, anoAtual]);
 
   const novosClientesMes = useMemo(
-    () => clients.filter((c) => mesRef(c.criadoEm) === monthAnchor).length,
+    () => clients.filter((c) => !c.rascunho && mesRef(c.criadoEm) === monthAnchor).length,
     [clients, monthAnchor]
   );
 
@@ -2603,30 +2615,28 @@ export default function App() {
     return decididas > 0 ? Math.round((proposalStats.confirmadas / decididas) * 100) : 0;
   }, [proposalStats]);
 
-  const resumoPorCategoria = useMemo(() => {
+  function computeResumoPorCategoria(mes) {
     const num = (v) => parseFloat(v) || 0;
-    const doMes = transacoes.filter((t) => t.tipo === "Despesa" && mesRef(t.data) === monthAnchor);
-    const porTag = {};
-    let semTag = 0;
+    const doMes = transacoes.filter((t) => t.tipo === "Despesa" && mesRef(t.data) === mes);
+    const porCategoria = {};
     doMes.forEach((t) => {
-      if (!t.tags || t.tags.length === 0) {
-        semTag += num(t.valor);
-        return;
-      }
-      t.tags.forEach((tagId) => {
-        porTag[tagId] = (porTag[tagId] || 0) + num(t.valor);
-      });
+      const chave = t.categoria || "Sem categoria";
+      porCategoria[chave] = (porCategoria[chave] || 0) + num(t.valor);
     });
-    const linhas = Object.entries(porTag)
-      .map(([tagId, total]) => {
-        const tg = tags.find((x) => x.id === tagId);
-        return tg ? { id: tagId, nome: tg.nome, cor: tg.cor, total } : null;
-      })
-      .filter(Boolean);
-    if (semTag > 0) linhas.push({ id: "sem-tag", nome: "Sem tag", cor: "#6b7078", total: semTag });
+    const linhas = Object.entries(porCategoria).map(([nome, total]) => {
+      const tg = tags.find((x) => x.nome === nome);
+      return { id: nome, nome, cor: tg?.cor || "#6b7078", total };
+    });
     linhas.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     return linhas;
-  }, [transacoes, tags, monthAnchor]);
+  }
+  const resumoPorCategoria = useMemo(() => computeResumoPorCategoria(monthAnchor), [transacoes, tags, monthAnchor]);
+  const relatorioResumoPorCategoria = useMemo(() => computeResumoPorCategoria(relatorioMes), [transacoes, tags, relatorioMes]);
+
+  const clientesVisiveis = useMemo(
+    () => (mostrarClientesRascunho ? clients : clients.filter((c) => !c.rascunho)),
+    [clients, mostrarClientesRascunho]
+  );
 
   const filteredEquipamentos = useMemo(() => {
     let list = equipamentos;
@@ -2727,10 +2737,9 @@ export default function App() {
 
   const filteredTransacoesBase = useMemo(() => {
     let list = transacoes.filter((t) => mesRef(t.data) === monthAnchor || !t.data);
-    if (tagFilterIds.length > 0) list = list.filter((t) => (t.tags || []).some((id) => tagFilterIds.includes(id)));
     if (financeClienteFilter) list = list.filter((t) => t.clienteId === financeClienteFilter);
     return list;
-  }, [transacoes, monthAnchor, tagFilterIds, financeClienteFilter]);
+  }, [transacoes, monthAnchor, financeClienteFilter]);
 
   function aplicarFiltroStatus(list, statusFiltro) {
     if (statusFiltro === "atrasadas") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
@@ -2780,32 +2789,46 @@ export default function App() {
     () => ordenarTransacoes(aplicarFiltroStatus(filteredTransacoesBase.filter((t) => t.tipo === "Receita"), financeStatusReceitaFilter), financeReceitasSortKey, financeReceitasSortDir),
     [filteredTransacoesBase, financeStatusReceitaFilter, financeReceitasSortKey, financeReceitasSortDir, demands, clients]
   );
-  const filteredDespesas = useMemo(
-    () => ordenarTransacoes(aplicarFiltroStatus(filteredTransacoesBase.filter((t) => t.tipo === "Despesa"), financeStatusDespesaFilter), financeDespesasSortKey, financeDespesasSortDir),
-    [filteredTransacoesBase, financeStatusDespesaFilter, financeDespesasSortKey, financeDespesasSortDir, demands, clients]
-  );
+  const filteredDespesas = useMemo(() => {
+    let list = filteredTransacoesBase.filter((t) => t.tipo === "Despesa");
+    if (financeCategoriaDespesaFilter) list = list.filter((t) => t.categoria === financeCategoriaDespesaFilter);
+    list = aplicarFiltroStatus(list, financeStatusDespesaFilter);
+    return ordenarTransacoes(list, financeDespesasSortKey, financeDespesasSortDir);
+  }, [filteredTransacoesBase, financeStatusDespesaFilter, financeCategoriaDespesaFilter, financeDespesasSortKey, financeDespesasSortDir, demands, clients]);
 
-  const saldoAcumulado = useMemo(() => {
+  function computeSaldoAcumulado(ateMes) {
     const num = (v) => parseFloat(v) || 0;
     return transacoes.reduce((acc, t) => {
       if (t.statusPagamento !== "Pago") return acc;
-      if (mesRef(t.data) > monthAnchor) return acc;
+      if (mesRef(t.data) > ateMes) return acc;
       return acc + (t.tipo === "Receita" ? num(t.valor) : -num(t.valor));
     }, 0);
-  }, [transacoes, monthAnchor]);
+  }
+  const saldoAcumulado = useMemo(() => computeSaldoAcumulado(monthAnchor), [transacoes, monthAnchor]);
+  const relatorioSaldoAcumulado = useMemo(() => computeSaldoAcumulado(relatorioMes), [transacoes, relatorioMes]);
 
-  const saudeFinanceiraMes = useMemo(() => {
-    const faturado = financeStatsMes.totalReceita;
-    const despesasOperacionais = financeStatsMes.totalDespesas;
+  function computeSaudeFinanceira(statsMes, saldoAcum, ultimosMesesArr) {
+    const faturado = statsMes.totalReceita;
+    const despesasOperacionais = statsMes.totalDespesas;
     const impostoValor = (faturado * (parseFloat(parametrosFinanceiros.pctImposto) || 0)) / 100;
     const proLaboreValor = parseFloat(parametrosFinanceiros.proLabore) || 0;
     const reservaValor = (faturado * (parseFloat(parametrosFinanceiros.pctReserva) || 0)) / 100;
     const sobraLivre = faturado - despesasOperacionais - impostoValor - proLaboreValor - reservaValor;
-    const mediaDespesas = ultimosMeses.reduce((s, m) => s + m.totalDespesas, 0) / (ultimosMeses.length || 1);
+    const mediaDespesas = ultimosMesesArr.reduce((s, m) => s + m.totalDespesas, 0) / (ultimosMesesArr.length || 1);
     const custoMensalTotal = mediaDespesas + proLaboreValor;
-    const mesesGarantidos = custoMensalTotal > 0 ? saldoAcumulado / custoMensalTotal : null;
-    return { faturado, despesasOperacionais, impostoValor, proLaboreValor, reservaValor, sobraLivre, mediaDespesas, mesesGarantidos };
-  }, [financeStatsMes, parametrosFinanceiros, ultimosMeses, saldoAcumulado]);
+    const mesesGarantidos = custoMensalTotal > 0 ? saldoAcum / custoMensalTotal : null;
+    const reservaIdealValor = custoMensalTotal * MESES_RESERVA_IDEAL;
+    const pctDaReservaIdeal = reservaIdealValor > 0 ? (saldoAcum / reservaIdealValor) * 100 : null;
+    return { faturado, despesasOperacionais, impostoValor, proLaboreValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal };
+  }
+  const saudeFinanceiraMes = useMemo(
+    () => computeSaudeFinanceira(financeStatsMes, saldoAcumulado, ultimosMeses),
+    [financeStatsMes, parametrosFinanceiros, ultimosMeses, saldoAcumulado]
+  );
+  const relatorioSaudeFinanceira = useMemo(
+    () => computeSaudeFinanceira(relatorioStatsMes, relatorioSaldoAcumulado, ultimosMesesRelatorio),
+    [relatorioStatsMes, parametrosFinanceiros, ultimosMesesRelatorio, relatorioSaldoAcumulado]
+  );
 
   return (
     <div className="app">
@@ -3056,6 +3079,14 @@ export default function App() {
         .gauge-sublabel { fill: var(--text-dim); font-size: 9px; }
         .gauge-label { font-size: 11.5px; color: var(--text-dim); text-align: center; }
         .metas-line b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+        .reservas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; align-items: start; }
+        .reserva-card { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; backdrop-filter: blur(8px); text-align: center; }
+        .reserva-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; text-align: left; }
+        .reserva-card-head h4 { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.4px; margin: 0; }
+        .reserva-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+        .reserva-valor-simples { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; padding: 20px 0; }
+        .reserva-ajuste-row { display: flex; gap: 6px; margin-top: 14px; }
+        .reserva-ajuste-row input { flex: 1; min-width: 0; }
         .kanban-inbox-bar {
           display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 14px;
           background: rgba(217,164,65,0.06); border: 1px dashed var(--amber); border-radius: 12px;
@@ -3343,7 +3374,8 @@ export default function App() {
         .video-sublist { display: flex; flex-direction: column; gap: 6px; }
         .video-subrow-item { display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 6px; }
         .video-subrow-name { flex: 1; font-size: 12.5px; color: var(--text); }
-        .video-subrow-item select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 170px; }
+        .video-subrow-item select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 190px; }
+        .video-subrow-item input[type="date"] { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 140px; }
         .demand-status-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-family: inherit; }
         .demand-drag-handle { display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: grab; }
         .demand-drag-handle:active { cursor: grabbing; }
@@ -3379,6 +3411,7 @@ export default function App() {
         .video-item-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
         .video-item-row input[type="text"], .video-item-row input:not([type]) { flex: 1.2; min-width: 0; }
         .video-item-row select { flex: 1; min-width: 0; font-size: 12px; padding: 6px 6px; }
+        .video-item-row input[type="date"] { flex: 0.9; min-width: 0; font-size: 12px; padding: 6px 6px; }
         .video-item-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
         .processos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
         .processo-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
@@ -3437,6 +3470,9 @@ export default function App() {
           </button>
           <button className={"rail-btn " + (tab === "metas" ? "active" : "")} onClick={() => setTab("metas")}>
             <Target size={16} /> <span className="rail-label">Metas</span>
+          </button>
+          <button className={"rail-btn " + (tab === "reservas" ? "active" : "")} onClick={() => setTab("reservas")}>
+            <PiggyBank size={16} /> <span className="rail-label">Reservas</span>
           </button>
           <button className={"rail-btn " + (tab === "relatorios" ? "active" : "")} onClick={() => setTab("relatorios")}>
             <TrendingUp size={16} /> <span className="rail-label">Relatórios</span>
@@ -3760,9 +3796,13 @@ export default function App() {
                   <Plus size={15} /> Nova demanda
                 </button>
               </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", margin: "-6px 0 12px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", margin: "-6px 0 6px" }}>
                 <input type="checkbox" checked={mostrarFinalizadas} onChange={(e) => setMostrarFinalizadas(e.target.checked)} />
                 Mostrar demandas finalizadas
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", margin: "0 0 12px" }}>
+                <input type="checkbox" checked={mostrarVideosAprovados} onChange={(e) => setMostrarVideosAprovados(e.target.checked)} />
+                Mostrar vídeos aprovados
               </label>
 
               {filteredDemands.length === 0 ? (
@@ -3864,27 +3904,41 @@ export default function App() {
                               <td colSpan={8}>
                                 <div className="video-sublist">
                                   {d.itens.map((v, idx) => {
+                                    if (v.status === "Aprovado" && !mostrarVideosAprovados) return null;
                                     const cor = corStatusVideo(v, coresStatus);
                                     return (
                                       <div
                                         key={v.id}
                                         className="video-subrow-item"
                                         style={cor ? { background: `color-mix(in srgb, ${cor} 18%, transparent)` } : undefined}
+                                        onDragOver={(e) => { if (draggedVideoId) e.preventDefault(); }}
+                                        onDrop={(e) => { e.preventDefault(); if (draggedVideoId) { reordenarVideos(d.id, draggedVideoId, v.id); setDraggedVideoId(null); } }}
                                       >
+                                        <span
+                                          className="demand-drag-handle"
+                                          draggable
+                                          onDragStart={(e) => { e.stopPropagation(); setDraggedVideoId(v.id); }}
+                                          onDragEnd={() => setDraggedVideoId(null)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          title="Arrastar para reordenar"
+                                        >
+                                          <GripVertical size={14} />
+                                        </span>
                                         <span className="video-subrow-name">{v.nome || "Vídeo " + (idx + 1)}</span>
+                                        <input
+                                          type="date"
+                                          value={v.dataEntrega || ""}
+                                          onChange={(e) => updateVideoField(d.id, v.id, "dataEntrega", e.target.value)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          title="Data de entrega"
+                                        />
                                         <select
-                                          value={v.statusProducao}
-                                          onChange={(e) => updateVideoField(d.id, v.id, "statusProducao", e.target.value)}
-                                          style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "producao", v.statusProducao) }}
+                                          value={v.status}
+                                          onChange={(e) => updateVideoField(d.id, v.id, "status", e.target.value)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "video", v.status) }}
                                         >
-                                          {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
-                                        </select>
-                                        <select
-                                          value={v.statusAprovacao}
-                                          onChange={(e) => updateVideoField(d.id, v.id, "statusAprovacao", e.target.value)}
-                                          style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "aprovacao", v.statusAprovacao) }}
-                                        >
-                                          {VIDEO_STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                                          {VIDEO_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
                                         </select>
                                       </div>
                                     );
@@ -3915,11 +3969,17 @@ export default function App() {
                   <Plus size={15} /> Novo cliente
                 </button>
               </div>
-              {clients.length === 0 ? (
+              {clients.some((c) => c.rascunho) && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", margin: "-6px 0 12px" }}>
+                  <input type="checkbox" checked={mostrarClientesRascunho} onChange={(e) => setMostrarClientesRascunho(e.target.checked)} />
+                  Mostrar clientes em rascunho (proposta ainda não confirmada)
+                </label>
+              )}
+              {clientesVisiveis.length === 0 ? (
                 <div className="empty">Nenhum cliente cadastrado ainda. Crie o primeiro.</div>
               ) : clientView === "grade" ? (
                 <div className="client-grid">
-                  {clients.map((c) => (
+                  {clientesVisiveis.map((c) => (
                     <div className="client-card" key={c.id} onClick={() => setClientViewInfo(c)}>
                       <div
                         className="client-card-cover"
@@ -3929,7 +3989,7 @@ export default function App() {
                       </div>
                       <div className="client-card-footer">
                         <FileText size={13} />
-                        <span>{c.nome || "(sem nome)"}</span>
+                        <span>{c.nome || "(sem nome)"}{c.rascunho ? " (rascunho)" : ""}</span>
                       </div>
                     </div>
                   ))}
@@ -3947,9 +4007,9 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {clients.map((c) => (
+                    {clientesVisiveis.map((c) => (
                       <tr key={c.id}>
-                        <td className="proj">{c.nome || "(sem nome)"}</td>
+                        <td className="proj">{c.nome || "(sem nome)"}{c.rascunho ? " (rascunho)" : ""}</td>
                         <td>{c.tipo}</td>
                         <td className="mono">{c.email || c.telefone || "—"}</td>
                         <td>{demands.filter((d) => d.clienteId === c.id).length}</td>
@@ -4156,51 +4216,6 @@ export default function App() {
                   <Plus size={15} /> Nova receita
                 </button>
               </div>
-              {tags.length > 0 && (
-                <div className="tag-filter-row">
-                  <span className="tag-filter-label">Filtrar por tag:</span>
-                  {tags.map((tg) => (
-                    <button
-                      key={tg.id}
-                      className={"tag-pill tag-pill-btn" + (tagFilterIds.includes(tg.id) ? " selected" : "")}
-                      style={{ "--tag-color": tg.cor }}
-                      onClick={() => toggleTagFilter(tg.id)}
-                    >
-                      <span className="tag-dot" style={{ background: tg.cor }} />
-                      {tg.nome}
-                    </button>
-                  ))}
-                  {tagFilterIds.length > 0 && (
-                    <button className="tag-filter-clear" onClick={() => setTagFilterIds([])}>Limpar</button>
-                  )}
-                </div>
-              )}
-
-              {resumoPorCategoria.length > 0 && (
-                <div className="categoria-panel">
-                  <div className="categoria-panel-head">
-                    <span>Resumo por categoria — {mesLabel(monthAnchor)}</span>
-                  </div>
-                  <div className="categoria-search-row">
-                    <input
-                      value={categoriaSearch}
-                      onChange={(e) => setCategoriaSearch(e.target.value)}
-                      placeholder="Filtrar tags…"
-                    />
-                  </div>
-                  <div className="categoria-list">
-                    {resumoPorCategoria
-                      .filter((l) => l.nome.toLowerCase().includes(categoriaSearch.trim().toLowerCase()))
-                      .map((l) => (
-                        <div className="categoria-row" key={l.id}>
-                          <span className="categoria-swatch" style={{ background: l.cor }} />
-                          <span className="categoria-nome">{l.nome}</span>
-                          <span className="categoria-total">R$ {l.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
 
               <div className="finance-panel">
                 <h3 className="config-section-title finance-panel-title">
@@ -4294,7 +4309,7 @@ export default function App() {
                       id="financeiro-despesas"
                       openId={openFilterMenu}
                       setOpenId={setOpenFilterMenu}
-                      activeCount={financeStatusDespesaFilter !== "todos" ? 1 : 0}
+                      activeCount={(financeStatusDespesaFilter !== "todos" ? 1 : 0) + (financeCategoriaDespesaFilter ? 1 : 0)}
                     >
                       <div className="filter-menu-field">
                         <label>Status</label>
@@ -4305,8 +4320,15 @@ export default function App() {
                           <option value="pendentes">Só pendentes</option>
                         </select>
                       </div>
-                      {financeStatusDespesaFilter !== "todos" && (
-                        <button className="filter-menu-clear" onClick={() => setFinanceStatusDespesaFilter("todos")}>
+                      <div className="filter-menu-field">
+                        <label>Categoria</label>
+                        <select value={financeCategoriaDespesaFilter} onChange={(e) => setFinanceCategoriaDespesaFilter(e.target.value)}>
+                          <option value="">Todas as categorias</option>
+                          {tags.map((tg) => <option key={tg.id} value={tg.nome}>{tg.nome}</option>)}
+                        </select>
+                      </div>
+                      {(financeStatusDespesaFilter !== "todos" || financeCategoriaDespesaFilter) && (
+                        <button className="filter-menu-clear" onClick={() => { setFinanceStatusDespesaFilter("todos"); setFinanceCategoriaDespesaFilter(""); }}>
                           Limpar filtro
                         </button>
                       )}
@@ -4323,7 +4345,6 @@ export default function App() {
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "descricao")}>Descrição {financeDespesasSortKey === "descricao" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "categoria")}>Categoria {financeDespesasSortKey === "categoria" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "natureza")}>Natureza {financeDespesasSortKey === "natureza" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th>Tags</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "cliente")}>Cliente / Demanda {financeDespesasSortKey === "cliente" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "valor")}>Valor {financeDespesasSortKey === "valor" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "vencimento")}>Vencimento {financeDespesasSortKey === "vencimento" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
@@ -4335,7 +4356,6 @@ export default function App() {
                       {filteredDespesas.map((t) => {
                         const statusEfetivo = getStatusPagamentoEfetivo(t);
                         const demanda = demands.find((d) => d.id === t.demandaId);
-                        const tTags = (t.tags || []).map((id) => tags.find((tg) => tg.id === id)).filter(Boolean);
                         return (
                           <tr key={t.id}>
                             <td className="proj">
@@ -4348,31 +4368,6 @@ export default function App() {
                             </td>
                             <td>{t.categoria}</td>
                             <td>{t.natureza || "Variável"}</td>
-                            <td>
-                              <div className="tag-cell">
-                                <button className="tag-cell-btn" onClick={(e) => { e.stopPropagation(); setTagPopoverFor(tagPopoverFor === t.id ? null : t.id); }}>
-                                  {tTags.length === 0 ? (
-                                    <span className="tag-cell-empty">+ tag</span>
-                                  ) : (
-                                    tTags.map((tg) => (
-                                      <span key={tg.id} className="tag-pill" style={{ "--tag-color": tg.cor }}>
-                                        <span className="tag-dot" style={{ background: tg.cor }} />
-                                        {tg.nome}
-                                      </span>
-                                    ))
-                                  )}
-                                </button>
-                                {tagPopoverFor === t.id && (
-                                  <TagPicker
-                                    allTags={tags}
-                                    selectedIds={t.tags || []}
-                                    onToggle={(tagId) => toggleTagOnTransacao(t.id, tagId)}
-                                    onCreate={(nome, cor) => createTag(nome, cor)}
-                                    onClose={() => setTagPopoverFor(null)}
-                                  />
-                                )}
-                              </div>
-                            </td>
                             <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
                             <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                             <td className="mono">{fmtDate(t.data)}</td>
@@ -4398,6 +4393,32 @@ export default function App() {
                   </table>
                 )}
               </div>
+
+              {resumoPorCategoria.length > 0 && (
+                <div className="categoria-panel">
+                  <div className="categoria-panel-head">
+                    <span>Resumo por categoria — {mesLabel(monthAnchor)}</span>
+                  </div>
+                  <div className="categoria-search-row">
+                    <input
+                      value={categoriaSearch}
+                      onChange={(e) => setCategoriaSearch(e.target.value)}
+                      placeholder="Filtrar categorias…"
+                    />
+                  </div>
+                  <div className="categoria-list">
+                    {resumoPorCategoria
+                      .filter((l) => l.nome.toLowerCase().includes(categoriaSearch.trim().toLowerCase()))
+                      .map((l) => (
+                        <div className="categoria-row" key={l.id}>
+                          <span className="categoria-swatch" style={{ background: l.cor }} />
+                          <span className="categoria-nome">{l.nome}</span>
+                          <span className="categoria-total">R$ {l.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               <div className="finance-panel">
                 <h3 className="config-section-title">Resumo financeiro — {mesLabel(monthAnchor)}</h3>
@@ -4429,7 +4450,39 @@ export default function App() {
                       <span>Meses garantidos</span>
                       <b>{saudeFinanceiraMes.mesesGarantidos == null ? "—" : saudeFinanceiraMes.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses"}</b>
                     </div>
+                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                      <span>Reserva ideal ({MESES_RESERVA_IDEAL} meses de custo)</span>
+                      <b>R$ {saudeFinanceiraMes.reservaIdealValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                    </div>
+                    {saudeFinanceiraMes.pctDaReservaIdeal != null && (
+                      <div className="metas-line">
+                        <span>% da reserva ideal já garantido</span>
+                        <b style={{ color: saudeFinanceiraMes.pctDaReservaIdeal >= 100 ? "var(--teal)" : "var(--amber)" }}>
+                          {Math.min(999, saudeFinanceiraMes.pctDaReservaIdeal).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%
+                        </b>
+                      </div>
+                    )}
                   </div>
+                  {reservas.length > 0 && (
+                    <div className="metas-card">
+                      <h4>Reservas e poupanças</h4>
+                      <div className="metas-line" style={{ borderBottom: "1px solid var(--border)", marginBottom: 6, paddingBottom: 10 }}>
+                        <span>Total guardado</span>
+                        <b>R$ {reservas.reduce((s, r) => s + (parseFloat(r.valorAtual) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                      </div>
+                      {reservas.map((r) => {
+                        const atual = parseFloat(r.valorAtual) || 0;
+                        const alvo = parseFloat(r.valorAlvo) || 0;
+                        return (
+                          <div className="metas-line" key={r.id}>
+                            <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: r.cor, marginRight: 6 }} />{r.nome}</span>
+                            <b>R$ {atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}{alvo > 0 ? " / R$ " + alvo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""}</b>
+                          </div>
+                        );
+                      })}
+                      <button className="btn-ghost" style={{ marginTop: 10, width: "100%" }} onClick={() => setTab("reservas")}>Gerenciar reservas</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -4528,6 +4581,90 @@ export default function App() {
                   </div>
                 );
               })()}
+            </>
+          ) : tab === "reservas" ? (
+            <>
+              <div className="toolbar">
+                <div />
+                <button className="btn-primary" onClick={() => setReservaForm(emptyReserva())}>
+                  <Plus size={15} /> Nova reserva
+                </button>
+              </div>
+
+              {reservas.length === 0 ? (
+                <div className="empty" style={{ padding: "40px 0" }}>
+                  Nenhuma reserva criada ainda. Crie reservas pra objetivos como reserva de emergência, equipamentos, impostos, etc.
+                </div>
+              ) : (
+                <div className="reservas-grid">
+                  {reservas.map((r) => {
+                    const atual = parseFloat(r.valorAtual) || 0;
+                    const alvo = parseFloat(r.valorAlvo) || 0;
+                    const pct = alvo > 0 ? Math.min(999, (atual / alvo) * 100) : 0;
+                    const ajusteVal = reservaAjusteInput[r.id] || "";
+                    return (
+                      <div className="reserva-card" key={r.id} style={{ borderTop: "3px solid " + r.cor }}>
+                        <div className="reserva-card-head">
+                          <h4>{r.nome}</h4>
+                          <div className="reserva-card-actions">
+                            <button className="icon-btn" title="Editar" onClick={() => setReservaForm(r)}><Pencil size={14} /></button>
+                            <button className="icon-btn" title="Excluir" onClick={() => setConfirmDelete({ type: "reserva", id: r.id, label: r.nome })}><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+
+                        {alvo > 0 ? (
+                          <GoalGauge pct={pct} size={112} />
+                        ) : (
+                          <div className="reserva-valor-simples">R$ {atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
+                        )}
+
+                        <div style={{ marginTop: 12 }}>
+                          <div className="metas-line"><span>Valor atual</span><b>R$ {atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                          {alvo > 0 && (
+                            <>
+                              <div className="metas-line"><span>Meta</span><b>R$ {alvo.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                              <div className="metas-line"><span>Falta</span><b>R$ {Math.max(0, alvo - atual).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="reserva-ajuste-row">
+                          <input
+                            type="number"
+                            placeholder="Valor"
+                            value={ajusteVal}
+                            onChange={(e) => setReservaAjusteInput({ ...reservaAjusteInput, [r.id]: e.target.value })}
+                          />
+                          <button
+                            className="icon-btn"
+                            title="Adicionar"
+                            onClick={() => {
+                              const v = parseFloat(ajusteVal) || 0;
+                              if (v <= 0) return;
+                              ajustarReserva(r.id, v);
+                              setReservaAjusteInput({ ...reservaAjusteInput, [r.id]: "" });
+                            }}
+                          >
+                            <Plus size={14} />
+                          </button>
+                          <button
+                            className="icon-btn"
+                            title="Retirar"
+                            onClick={() => {
+                              const v = parseFloat(ajusteVal) || 0;
+                              if (v <= 0) return;
+                              ajustarReserva(r.id, -v);
+                              setReservaAjusteInput({ ...reservaAjusteInput, [r.id]: "" });
+                            }}
+                          >
+                            <Minus size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : tab === "equipamentos" ? (
             <>
@@ -4692,7 +4829,10 @@ export default function App() {
                   <div className="metas-card">
                     <h4>Margem de lucro — {mesLabel(relatorioMes)}</h4>
                     <div className="metas-line"><span>Entradas</span><b>R$ {relatorioStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Saídas</span><b>R$ {relatorioStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Despesas</span><b>R$ {relatorioStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                    {relatorioStatsMes.proLaboreValor > 0 && (
+                      <div className="metas-line"><span>Pró-labore</span><b>R$ {relatorioStatsMes.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                    )}
                     <div className="metas-line"><span>Margem</span><b>R$ {relatorioStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
                   </div>
                 </div>
@@ -4706,6 +4846,80 @@ export default function App() {
                           <tr key={r.nome}>
                             <td className="proj">{r.nome}</td>
                             <td className="mono">R$ {r.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </ReportSection>
+
+              <ReportSection
+                title="Saúde financeira"
+                subtitle={"sobra livre de R$ " + relatorioSaudeFinanceira.sobraLivre.toLocaleString("pt-BR", { minimumFractionDigits: 0 }) + " · " + (relatorioSaudeFinanceira.mesesGarantidos == null ? "sem saldo acumulado" : relatorioSaudeFinanceira.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses garantidos")}
+              >
+                <div className="metas-grid">
+                  <div className="metas-card">
+                    <h4>Distribuição do faturamento</h4>
+                    <div className="metas-line"><span>Faturado</span><b>R$ {relatorioSaudeFinanceira.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Despesas operacionais</span><b>- R$ {relatorioSaudeFinanceira.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {relatorioSaudeFinanceira.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Pró-labore</span><b>- R$ {relatorioSaudeFinanceira.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Reserva/investimento ({parametrosFinanceiros.pctReserva || 0}%)</span><b>- R$ {relatorioSaudeFinanceira.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                      <span>Sobra livre</span>
+                      <b style={{ color: relatorioSaudeFinanceira.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
+                        R$ {relatorioSaudeFinanceira.sobraLivre.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </b>
+                    </div>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Fôlego financeiro</h4>
+                    <div className="metas-line"><span>Saldo acumulado</span><b>R$ {relatorioSaldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Média de despesas (6 meses)</span><b>R$ {relatorioSaudeFinanceira.mediaDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line">
+                      <span>Meses garantidos</span>
+                      <b>{relatorioSaudeFinanceira.mesesGarantidos == null ? "—" : relatorioSaudeFinanceira.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses"}</b>
+                    </div>
+                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                      <span>Reserva ideal ({MESES_RESERVA_IDEAL} meses de custo)</span>
+                      <b>R$ {relatorioSaudeFinanceira.reservaIdealValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                    </div>
+                    {relatorioSaudeFinanceira.pctDaReservaIdeal != null && (
+                      <div className="metas-line">
+                        <span>% da reserva ideal já garantido</span>
+                        <b style={{ color: relatorioSaudeFinanceira.pctDaReservaIdeal >= 100 ? "var(--teal)" : "var(--amber)" }}>
+                          {Math.min(999, relatorioSaudeFinanceira.pctDaReservaIdeal).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%
+                        </b>
+                      </div>
+                    )}
+                  </div>
+                  {reservas.length > 0 && (
+                    <div className="metas-card">
+                      <h4>Reservas e poupanças</h4>
+                      <div className="metas-line" style={{ borderBottom: "1px solid var(--border)", marginBottom: 6, paddingBottom: 10 }}>
+                        <span>Total guardado</span>
+                        <b>R$ {reservas.reduce((s, r) => s + (parseFloat(r.valorAtual) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                      </div>
+                      {reservas.map((r) => (
+                        <div className="metas-line" key={r.id}>
+                          <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: r.cor, marginRight: 6 }} />{r.nome}</span>
+                          <b>R$ {(parseFloat(r.valorAtual) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {relatorioResumoPorCategoria.length > 0 && (
+                  <>
+                    <h3 className="config-section-title" style={{ marginTop: 24 }}>Despesas por categoria — {mesLabel(relatorioMes)}</h3>
+                    <table>
+                      <thead><tr><th>Categoria</th><th>Total</th></tr></thead>
+                      <tbody>
+                        {relatorioResumoPorCategoria.map((c) => (
+                          <tr key={c.id}>
+                            <td className="proj"><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: c.cor, marginRight: 8 }} />{c.nome}</td>
+                            <td className="mono">R$ {c.total.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -4798,6 +5012,11 @@ export default function App() {
                   <DollarSign size={20} />
                   <span className="config-card-title">Tipos de receita</span>
                   <span className="config-card-sub">{tiposReceita.length} cadastrados</span>
+                </button>
+                <button className="config-card" onClick={() => setConfigSecaoAtiva("categoriasDespesa")}>
+                  <CreditCard size={20} />
+                  <span className="config-card-title">Categorias de despesa</span>
+                  <span className="config-card-sub">{tags.length} cadastradas</span>
                 </button>
                 <button className="config-card" onClick={() => setConfigSecaoAtiva("categoriasEquip")}>
                   <Camera size={20} />
@@ -5057,6 +5276,70 @@ export default function App() {
                   </button>
                 </div>
               </div>
+            ) : configSecaoAtiva === "categoriasDespesa" ? (
+              <div className="config-panel">
+                <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
+                <h3 className="config-section-title">Categorias de despesa</h3>
+                <p className="config-hint">Usadas no cadastro de despesas e no resumo por categoria — separadas das categorias de receita. Renomear atualiza as despesas que já usam essa categoria.</p>
+                <div className="config-tipo-list">
+                  {tags.map((tg) => (
+                    <div className="config-tipo-item" key={tg.id}>
+                      {categoriaDespesaEditando === tg.id ? (
+                        <>
+                          <input
+                            type="color"
+                            value={tg.cor}
+                            onChange={(e) => renameTag(tg.id, categoriaDespesaEditValue, e.target.value)}
+                            style={{ width: 30, height: 30, flexShrink: 0, padding: 0, border: "none", background: "none" }}
+                          />
+                          <input
+                            value={categoriaDespesaEditValue}
+                            autoFocus
+                            onChange={(e) => setCategoriaDespesaEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { renameTag(tg.id, categoriaDespesaEditValue); setCategoriaDespesaEditando(null); }
+                              if (e.key === "Escape") setCategoriaDespesaEditando(null);
+                            }}
+                          />
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { renameTag(tg.id, categoriaDespesaEditValue); setCategoriaDespesaEditando(null); }}><CheckCircle size={13} /></button>
+                            <button className="icon-btn" onClick={() => setCategoriaDespesaEditando(null)}><X size={13} /></button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: "50%", background: tg.cor, flexShrink: 0 }} />
+                            {tg.nome}
+                          </span>
+                          <div className="config-tipo-actions">
+                            <button className="icon-btn" onClick={() => { setCategoriaDespesaEditando(tg.id); setCategoriaDespesaEditValue(tg.nome); }}><Pencil size={13} /></button>
+                            <button className="icon-btn" onClick={() => deleteTag(tg.id)}><Trash2 size={13} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {tags.length === 0 && <div className="empty">Nenhuma categoria cadastrada ainda.</div>}
+                </div>
+                <div className="config-add-row">
+                  <input
+                    value={novaCategoriaDespesaInput}
+                    onChange={(e) => setNovaCategoriaDespesaInput(e.target.value)}
+                    placeholder="Nova categoria de despesa…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { createTag(novaCategoriaDespesaInput); setNovaCategoriaDespesaInput(""); }
+                    }}
+                  />
+                  <button
+                    className="btn-primary"
+                    style={{ marginLeft: 0 }}
+                    onClick={() => { createTag(novaCategoriaDespesaInput); setNovaCategoriaDespesaInput(""); }}
+                  >
+                    <Plus size={15} /> Adicionar
+                  </button>
+                </div>
+              </div>
             ) : configSecaoAtiva === "categoriasEquip" ? (
               <div className="config-panel">
                 <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
@@ -5117,7 +5400,20 @@ export default function App() {
                 <button className="config-back" onClick={() => setConfigSecaoAtiva(null)}><ChevronLeft size={14} /> Voltar</button>
                 <h3 className="config-section-title">Cores de status</h3>
                 <p className="config-hint">Define a cor da bolinha ao lado do status de Produção e Aprovação, na lista de Demandas, e do tipo de produção nas Propostas e Relatórios.</p>
-                <p className="config-hint" style={{ marginTop: 16, fontWeight: 600, color: "var(--text)" }}>Produção</p>
+                <p className="config-hint" style={{ marginTop: 16, fontWeight: 600, color: "var(--text)" }}>Status do vídeo</p>
+                <div className="config-cores-list">
+                  {VIDEO_STATUS.map((s) => (
+                    <div className="config-cor-item" key={"video:" + s}>
+                      <input
+                        type="color"
+                        value={corDoStatusComMapa(coresStatus, "video", s)}
+                        onChange={(e) => setCorStatus("video:" + s, e.target.value)}
+                      />
+                      <span>{s}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="config-hint" style={{ marginTop: 20, fontWeight: 600, color: "var(--text)" }}>Produção</p>
                 <div className="config-cores-list">
                   {STATUS_PRODUCAO.map((s) => (
                     <div className="config-cor-item" key={"producao:" + s}>
@@ -5315,23 +5611,23 @@ export default function App() {
                       setDemandForm({ ...demandForm, itens });
                     }}
                   />
-                  <select
-                    value={v.statusProducao}
+                  <input
+                    type="date"
+                    value={v.dataEntrega || ""}
+                    title="Data de entrega"
                     onChange={(e) => {
-                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, statusProducao: e.target.value } : it));
+                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, dataEntrega: e.target.value } : it));
+                      setDemandForm({ ...demandForm, itens });
+                    }}
+                  />
+                  <select
+                    value={v.status}
+                    onChange={(e) => {
+                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, status: e.target.value } : it));
                       setDemandForm({ ...demandForm, itens });
                     }}
                   >
-                    {STATUS_PRODUCAO.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <select
-                    value={v.statusAprovacao}
-                    onChange={(e) => {
-                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, statusAprovacao: e.target.value } : it));
-                      setDemandForm({ ...demandForm, itens });
-                    }}
-                  >
-                    {VIDEO_STATUS_APROVACAO.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {VIDEO_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <button
                     className="icon-btn"
@@ -5593,7 +5889,7 @@ export default function App() {
                     setTransacaoForm({
                       ...transacaoForm,
                       tipo,
-                      categoria: tipo === "Receita" ? (tiposProducao[0] || "") : CATEGORIAS_DESPESA[0],
+                      categoria: tipo === "Receita" ? (tiposProducao[0] || "") : (tags[0]?.nome || ""),
                       tipoReceita: tipo === "Receita" ? (transacaoForm.tipoReceita || tiposReceita[0] || "") : transacaoForm.tipoReceita,
                     });
                   }}
@@ -5605,7 +5901,7 @@ export default function App() {
               <div className="field">
                 <label>{transacaoForm.tipo === "Receita" ? "Tipo de produção" : "Categoria"}</label>
                 <select value={transacaoForm.categoria} onChange={(e) => setTransacaoForm({ ...transacaoForm, categoria: e.target.value })}>
-                  {(transacaoForm.tipo === "Receita" ? tiposProducao : CATEGORIAS_DESPESA).map((c) => (
+                  {(transacaoForm.tipo === "Receita" ? tiposProducao : tags.map((tg) => tg.nome)).map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
@@ -5641,42 +5937,6 @@ export default function App() {
                 <select value={transacaoForm.natureza || "Variável"} onChange={(e) => setTransacaoForm({ ...transacaoForm, natureza: e.target.value })}>
                   {NATUREZA_DESPESA.map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
-              </div>
-            )}
-            {transacaoForm.tipo === "Despesa" && (
-              <div className="field" style={{ position: "relative" }}>
-                <label>Tags</label>
-                <div className="tag-cell">
-                  <button type="button" className="tag-cell-btn" onClick={(e) => { e.stopPropagation(); setTagPopoverFor(tagPopoverFor === "form" ? null : "form"); }}>
-                    {(transacaoForm.tags || []).length === 0 ? (
-                      <span className="tag-cell-empty">+ adicionar tag</span>
-                    ) : (
-                      (transacaoForm.tags || []).map((id) => {
-                        const tg = tags.find((x) => x.id === id);
-                        if (!tg) return null;
-                        return (
-                          <span key={id} className="tag-pill" style={{ "--tag-color": tg.cor }}>
-                            <span className="tag-dot" style={{ background: tg.cor }} />
-                            {tg.nome}
-                          </span>
-                        );
-                      })
-                    )}
-                  </button>
-                  {tagPopoverFor === "form" && (
-                    <TagPicker
-                      allTags={tags}
-                      selectedIds={transacaoForm.tags || []}
-                      onToggle={(tagId) => {
-                        const atual = transacaoForm.tags || [];
-                        const novo = atual.includes(tagId) ? atual.filter((id) => id !== tagId) : [...atual, tagId];
-                        setTransacaoForm({ ...transacaoForm, tags: novo });
-                      }}
-                      onCreate={(nome, cor) => createTag(nome, cor)}
-                      onClose={() => setTagPopoverFor(null)}
-                    />
-                  )}
-                </div>
               </div>
             )}
             {!transacoes.some((t) => t.id === transacaoForm.id) && !transacaoForm.parcelaGrupoId && (
@@ -5819,6 +6079,63 @@ export default function App() {
         </div>
       )}
 
+      {reservaForm && (
+        <div className="overlay" onClick={() => setReservaForm(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {reservas.some((r) => r.id === reservaForm.id) ? "Editar reserva" : "Nova reserva"}
+              <button className="icon-btn" onClick={() => setReservaForm(null)}><X size={15} /></button>
+            </h3>
+            <div className="field">
+              <label>Nome da reserva</label>
+              <input
+                type="text"
+                placeholder="Ex: Reserva de emergência, Troca de câmera…"
+                value={reservaForm.nome}
+                onChange={(e) => setReservaForm({ ...reservaForm, nome: e.target.value })}
+              />
+            </div>
+            <div className="grid2">
+              <div className="field">
+                <label>Valor alvo (R$) — opcional</label>
+                <input type="number" step="0.01" value={reservaForm.valorAlvo} onChange={(e) => setReservaForm({ ...reservaForm, valorAlvo: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Valor atual (R$)</label>
+                <input type="number" step="0.01" value={reservaForm.valorAtual} onChange={(e) => setReservaForm({ ...reservaForm, valorAtual: e.target.value })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Cor</label>
+              <div className="config-cores-list">
+                {RESERVA_CORES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setReservaForm({ ...reservaForm, cor: c })}
+                    style={{
+                      width: 26, height: 26, borderRadius: "50%", background: c, border: reservaForm.cor === c ? "2px solid var(--text)" : "2px solid transparent", cursor: "pointer", padding: 0,
+                    }}
+                  />
+                ))}
+                <input type="color" value={reservaForm.cor} onChange={(e) => setReservaForm({ ...reservaForm, cor: e.target.value })} />
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setReservaForm(null)}>Cancelar</button>
+              <button
+                className="btn-primary"
+                style={{ marginLeft: 0 }}
+                disabled={!reservaForm.nome.trim()}
+                onClick={() => saveReserva({ ...reservaForm, nome: reservaForm.nome.trim() })}
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {processoForm && (
         <div className="overlay" onClick={() => { setProcessoForm(null); setProcessoNovoArquivo(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -5902,6 +6219,7 @@ export default function App() {
                   else if (confirmDelete.type === "equipamento") removeEquipamento(confirmDelete.id);
                   else if (confirmDelete.type === "processo") removeProcessoDocumento(confirmDelete.doc);
                   else if (confirmDelete.type === "proposta") removeProposal(confirmDelete.id);
+                  else if (confirmDelete.type === "reserva") deleteReserva(confirmDelete.id);
                   else removeClient(confirmDelete.id);
                 }}
               >

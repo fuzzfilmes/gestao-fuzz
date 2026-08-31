@@ -62,6 +62,7 @@ function clienteToRow(c) {
     capa_url: c.capaUrl || "",
     observacoes: c.observacoes || "",
     criado_em: n(c.criadoEm),
+    rascunho: !!c.rascunho,
   };
 }
 function clienteFromRow(r) {
@@ -83,6 +84,7 @@ function clienteFromRow(r) {
     capaUrl: r.capa_url,
     observacoes: r.observacoes,
     criadoEm: r.criado_em,
+    rascunho: !!r.rascunho,
   };
 }
 export async function listClientes() {
@@ -118,8 +120,8 @@ function itemToRow(demandaId, it, ordem) {
     id: it.id,
     demanda_id: demandaId,
     nome: it.nome || "",
-    status_producao: it.statusProducao || "Não iniciada",
-    status_aprovacao: it.statusAprovacao || "Aguardando",
+    status: it.status || "Não iniciado",
+    data_entrega: n(it.dataEntrega),
     ordem,
   };
 }
@@ -141,8 +143,8 @@ function demandaFromRow(r, itensByDemanda) {
     itens: (itensByDemanda.get(r.id) || []).map((it) => ({
       id: it.id,
       nome: it.nome,
-      statusProducao: it.status_producao,
-      statusAprovacao: it.status_aprovacao,
+      status: it.status || "Não iniciado",
+      dataEntrega: it.data_entrega || "",
     })),
   };
 }
@@ -283,7 +285,7 @@ function transacaoToRow(t) {
     parcela_total: t.parcelaTotal != null ? t.parcelaTotal : null,
   };
 }
-function transacaoFromRow(r, tagsByTransacao) {
+function transacaoFromRow(r) {
   return {
     id: r.id,
     tipo: r.tipo,
@@ -300,42 +302,15 @@ function transacaoFromRow(r, tagsByTransacao) {
     parcelaGrupoId: r.parcela_grupo_id || "",
     parcelaAtual: r.parcela_atual,
     parcelaTotal: r.parcela_total,
-    tags: tagsByTransacao.get(r.id) || [],
   };
 }
 export async function listTransacoes() {
-  const [transacoesRes, tagsRes] = await Promise.all([
-    supabase.from("transacoes").select("*").order("created_at", { ascending: false }),
-    supabase.from("transacao_tags").select("*"),
-  ]);
-  throwIfError(transacoesRes);
-  throwIfError(tagsRes);
-  const tagsByTransacao = new Map();
-  for (const row of tagsRes.data) {
-    if (!tagsByTransacao.has(row.transacao_id)) tagsByTransacao.set(row.transacao_id, []);
-    tagsByTransacao.get(row.transacao_id).push(row.tag_id);
-  }
-  return transacoesRes.data.map((r) => transacaoFromRow(r, tagsByTransacao));
+  const res = await supabase.from("transacoes").select("*").order("created_at", { ascending: false });
+  throwIfError(res);
+  return res.data.map((r) => transacaoFromRow(r));
 }
 export async function syncTransacoes(prevList, nextList) {
   await syncRows("transacoes", prevList, nextList, transacaoToRow);
-  const prevMap = new Map(prevList.map((t) => [t.id, t]));
-  for (const t of nextList) {
-    const prevTags = prevMap.get(t.id)?.tags || [];
-    const nextTags = t.tags || [];
-    const added = nextTags.filter((id) => !prevTags.includes(id));
-    const removed = prevTags.filter((id) => !nextTags.includes(id));
-    if (added.length) {
-      throwIfError(
-        await supabase.from("transacao_tags").insert(added.map((tagId) => ({ transacao_id: t.id, tag_id: tagId })))
-      );
-    }
-    if (removed.length) {
-      throwIfError(
-        await supabase.from("transacao_tags").delete().eq("transacao_id", t.id).in("tag_id", removed)
-      );
-    }
-  }
 }
 
 // ---------------- Equipamentos ----------------
@@ -516,6 +491,37 @@ export const syncMetasMensais = (prev, next) => syncMetas("metas_mensais", "mes"
 export const syncMetasAnuais = (prev, next) => syncMetas("metas_anuais", "ano", prev, next, (v) => num(v));
 export const syncMetasClientesMensais = (prev, next) =>
   syncMetas("metas_clientes_mensais", "mes", prev, next, (v) => intOrNull(v) ?? 0);
+
+// ---------------- Reservas e poupanças ----------------
+
+function reservaToRow(r) {
+  return {
+    id: r.id,
+    nome: r.nome || "",
+    valor_alvo: num(r.valorAlvo),
+    valor_atual: num(r.valorAtual),
+    cor: r.cor || "#4FA8A0",
+    criado_em: n(r.criadoEm),
+  };
+}
+function reservaFromRow(r) {
+  return {
+    id: r.id,
+    nome: r.nome,
+    valorAlvo: Number(r.valor_alvo) || 0,
+    valorAtual: Number(r.valor_atual) || 0,
+    cor: r.cor,
+    criadoEm: r.criado_em || "",
+  };
+}
+export async function listReservas() {
+  const res = await supabase.from("reservas").select("*").order("created_at", { ascending: true });
+  throwIfError(res);
+  return res.data.map(reservaFromRow);
+}
+export async function syncReservas(prevList, nextList) {
+  return syncRows("reservas", prevList, nextList, reservaToRow);
+}
 
 // ---------------- Parâmetros financeiros (saúde financeira) ----------------
 
