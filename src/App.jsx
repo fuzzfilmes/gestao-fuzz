@@ -64,6 +64,7 @@ const RETENCAO_DIAS = 30;
 const CATEGORIAS_RECEITA = ["Produção", "Consultoria", "Outro"];
 const STATUS_PAGAMENTO = ["Pendente", "Pago"];
 const NATUREZA_DESPESA = ["Variável", "Fixa"];
+const FREQUENCIA_LABEL = { mensal: "mensais", semanal: "semanais", semestral: "semestrais", anual: "anuais" };
 const TAG_COLORS = ["#D9A441", "#4FA8A0", "#E2574C", "#9B87C4", "#6FBF73", "#5B9BD9", "#E07BB5", "#B0B4BB"];
 
 const emptyTag = (nome, cor) => ({
@@ -1232,7 +1233,6 @@ export default function App() {
   const [financeStatusReceitaFilter, setFinanceStatusReceitaFilter] = useState("todos");
   const [financeStatusDespesaFilter, setFinanceStatusDespesaFilter] = useState("todos");
   const [financeCategoriaDespesaFilter, setFinanceCategoriaDespesaFilter] = useState("");
-  const [reservaDestinarInput, setReservaDestinarInput] = useState("");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
   const [financeReceitasSortKey, setFinanceReceitasSortKey] = useState(null);
   const [financeReceitasSortDir, setFinanceReceitasSortDir] = useState("asc");
@@ -1240,6 +1240,7 @@ export default function App() {
   const [financeDespesasSortDir, setFinanceDespesasSortDir] = useState("asc");
   const [monthAnchor, setMonthAnchor] = useState(mesRef(todayISO()));
   const [parcelasInput, setParcelasInput] = useState(1);
+  const [repeticaoFreq, setRepeticaoFreq] = useState("mensal");
   const [metas, setMetas] = useState({});
   const [metasAnuais, setMetasAnuais] = useState({});
   const [metasClientesNovos, setMetasClientesNovos] = useState({});
@@ -1249,18 +1250,22 @@ export default function App() {
   const [metaInputValue, setMetaInputValue] = useState("");
   const [metaAnualInputValue, setMetaAnualInputValue] = useState("");
   const [metaClientesInputValue, setMetaClientesInputValue] = useState("");
-  const [parametrosFinanceiros, setParametrosFinanceiros] = useState({ pctImposto: 0, proLabore: 0, pctReserva: 0 });
+  const [parametrosFinanceiros, setParametrosFinanceiros] = useState({ pctImposto: 0, pctReserva: 0 });
   const parametrosFinanceirosRef = useRef(parametrosFinanceiros);
   parametrosFinanceirosRef.current = parametrosFinanceiros;
   const [pctImpostoInput, setPctImpostoInput] = useState("");
-  const [proLaboreInput, setProLaboreInput] = useState("");
   const [pctReservaInput, setPctReservaInput] = useState("");
+  const [proLaborePorMes, setProLaborePorMes] = useState({});
+  const [proLaboreMesInput, setProLaboreMesInput] = useState("");
 
   useEffect(() => {
     setPctImpostoInput(parametrosFinanceiros.pctImposto ? String(parametrosFinanceiros.pctImposto) : "");
-    setProLaboreInput(parametrosFinanceiros.proLabore ? String(parametrosFinanceiros.proLabore) : "");
     setPctReservaInput(parametrosFinanceiros.pctReserva ? String(parametrosFinanceiros.pctReserva) : "");
   }, [parametrosFinanceiros]);
+
+  useEffect(() => {
+    setProLaboreMesInput(proLaborePorMes[monthAnchor] ? String(proLaborePorMes[monthAnchor]) : "");
+  }, [monthAnchor, proLaborePorMes]);
 
   useEffect(() => {
     if (!clientViewInfo) {
@@ -1377,7 +1382,8 @@ export default function App() {
         load("metas", api.listMetasMensais, setMetas, {}),
         load("metas anuais", api.listMetasAnuais, setMetasAnuais, {}),
         load("meta de clientes", api.listMetasClientesMensais, setMetasClientesNovos, {}),
-        load("parâmetros financeiros", api.getParametrosFinanceiros, setParametrosFinanceiros, { pctImposto: 0, proLabore: 0, pctReserva: 0 }),
+        load("parâmetros financeiros", api.getParametrosFinanceiros, setParametrosFinanceiros, { pctImposto: 0, pctReserva: 0 }),
+        load("pró-labore mensal", api.listProLaboreMensal, setProLaborePorMes, {}),
         load("tags", api.listTags, setTags, []),
         load("equipamentos", api.listEquipamentos, setEquipamentos, []),
         load(
@@ -1618,13 +1624,16 @@ export default function App() {
     }
   }
 
-  function addMonthsToDate(iso, n) {
+  function addPeriodoToDate(iso, n, frequencia) {
     const d = new Date(iso + "T00:00:00");
-    d.setMonth(d.getMonth() + n);
+    if (frequencia === "semanal") d.setDate(d.getDate() + n * 7);
+    else if (frequencia === "semestral") d.setMonth(d.getMonth() + n * 6);
+    else if (frequencia === "anual") d.setMonth(d.getMonth() + n * 12);
+    else d.setMonth(d.getMonth() + n);
     return d.toISOString().slice(0, 10);
   }
 
-  function saveTransacao(t, parcelas) {
+  function saveTransacao(t, parcelas, frequencia) {
     const exists = transacoes.some((x) => x.id === t.id);
     if (!exists && parcelas && parcelas > 1 && t.data) {
       const grupoId = "grp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
@@ -1635,7 +1644,7 @@ export default function App() {
           ...t,
           id: "t_" + Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 5),
           valor: valorFormatado,
-          data: addMonthsToDate(t.data, i),
+          data: addPeriodoToDate(t.data, i, frequencia || "mensal"),
           parcelaGrupoId: grupoId,
           parcelaAtual: i + 1,
           parcelaTotal: parcelas,
@@ -1648,6 +1657,7 @@ export default function App() {
     }
     setTransacaoForm(null);
     setParcelasInput(1);
+    setRepeticaoFreq("mensal");
   }
 
   function removeTransacao(id, todasParcelas) {
@@ -1717,6 +1727,42 @@ export default function App() {
     } catch (e) {
       console.error("Falha ao salvar parâmetros financeiros", e);
     }
+  }
+
+  async function persistProLaborePorMes(obj) {
+    const prev = proLaborePorMes;
+    setProLaborePorMes(obj);
+    try {
+      await api.syncProLaboreMensal(prev, obj);
+    } catch (e) {
+      console.error("Falha ao salvar pró-labore mensal", e);
+    }
+  }
+
+  function confirmarProLaboreMes(mes, valorStr) {
+    const valor = parseFloat(valorStr) || 0;
+    persistProLaborePorMes({ ...proLaborePorMes, [mes]: valor });
+    const id = "prolabore_" + mes;
+    const existente = transacoesRef.current.find((t) => t.id === id);
+    if (valor <= 0) {
+      if (existente) persistTransacoes(transacoesRef.current.filter((t) => t.id !== id));
+      return;
+    }
+    if (!tags.some((tg) => tg.nome === "Pró Labore")) createTag("Pró Labore", "#9B87C4");
+    const dados = {
+      ...emptyTransacao("Despesa"),
+      id,
+      descricao: "Pró-labore " + mesLabel(mes),
+      categoria: "Pró Labore",
+      natureza: "Fixa",
+      valor: String(valor),
+      data: mes + "-05",
+      statusPagamento: "Pago",
+    };
+    const list = existente
+      ? transacoesRef.current.map((t) => (t.id === id ? { ...t, ...dados } : t))
+      : [dados, ...transacoesRef.current];
+    persistTransacoes(list);
   }
 
   async function persistTags(list) {
@@ -1957,22 +2003,6 @@ export default function App() {
 
   function moveKanbanTask(id, novaData) {
     persistKanbanTasks(kanbanTasks.map((t) => (t.id === id ? { ...t, data: novaData } : t)));
-  }
-
-  function destinarReserva(valor) {
-    const v = parseFloat(valor);
-    if (!v || v <= 0) return;
-    if (!tags.some((tg) => tg.nome === "Reserva")) createTag("Reserva", "#4FA8A0");
-    const nova = {
-      ...emptyTransacao("Despesa"),
-      descricao: "Reserva da empresa",
-      categoria: "Reserva",
-      natureza: "Variável",
-      valor: String(v),
-      data: todayISO(),
-      statusPagamento: "Pago",
-    };
-    persistTransacoes([nova, ...transacoesRef.current]);
   }
 
   function toggleExpandDemand(id) {
@@ -2385,7 +2415,7 @@ export default function App() {
     return list;
   }, [proposals, proposalClienteFilter, proposalStatusFilter, proposalValorSort]);
 
-  const relatorioStatsMes = useMemo(() => computeMonthStats(transacoes, relatorioMes, parametrosFinanceiros.proLabore), [transacoes, relatorioMes, parametrosFinanceiros.proLabore]);
+  const relatorioStatsMes = useMemo(() => computeMonthStats(transacoes, relatorioMes), [transacoes, relatorioMes]);
 
   const relatorioReceitasPorTipo = useMemo(() => {
     const num = (v) => parseFloat(v) || 0;
@@ -2550,7 +2580,7 @@ export default function App() {
     return list;
   }, [followUps, demands, transacoes]);
 
-  function computeMonthStats(list, mes, proLabore = 0) {
+  function computeMonthStats(list, mes) {
     const num = (v) => parseFloat(v) || 0;
     const doMes = list.filter((t) => mesRef(t.data) === mes);
     const receitas = doMes.filter((t) => t.tipo === "Receita");
@@ -2560,8 +2590,8 @@ export default function App() {
     const totalDespesas = despesas.reduce((s, t) => s + num(t.valor), 0);
     const despesasFixas = despesas.filter((t) => t.natureza === "Fixa").reduce((s, t) => s + num(t.valor), 0);
     const despesasVariaveis = totalDespesas - despesasFixas;
-    const proLaboreValor = num(proLabore);
-    const margem = totalReceita - totalDespesas - proLaboreValor;
+    const proLaboreValor = despesas.filter((t) => t.categoria === "Pró Labore").reduce((s, t) => s + num(t.valor), 0);
+    const margem = totalReceita - totalDespesas;
     const margemPct = totalReceita > 0 ? (margem / totalReceita) * 100 : 0;
     return { mes, totalReceita, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasFixas, despesasVariaveis, proLaboreValor, margem, margemPct };
   }
@@ -2580,15 +2610,15 @@ export default function App() {
     return { totalReceita, recebido, aReceber, totalDespesas, despesasPagas, atrasadas, saldo };
   }, [transacoes]);
 
-  const financeStatsMes = useMemo(() => computeMonthStats(transacoes, monthAnchor, parametrosFinanceiros.proLabore), [transacoes, monthAnchor, parametrosFinanceiros.proLabore]);
+  const financeStatsMes = useMemo(() => computeMonthStats(transacoes, monthAnchor), [transacoes, monthAnchor]);
 
   function computeUltimosMeses(anchorMes) {
     const meses = [];
     for (let i = 5; i >= 0; i--) meses.push(addMonthsISO(anchorMes, -i));
-    return meses.map((m) => ({ ...computeMonthStats(transacoes, m, parametrosFinanceiros.proLabore), meta: metas[m] || 0 }));
+    return meses.map((m) => ({ ...computeMonthStats(transacoes, m), meta: metas[m] || 0 }));
   }
-  const ultimosMeses = useMemo(() => computeUltimosMeses(monthAnchor), [transacoes, monthAnchor, metas, parametrosFinanceiros.proLabore]);
-  const ultimosMesesRelatorio = useMemo(() => computeUltimosMeses(relatorioMes), [transacoes, relatorioMes, metas, parametrosFinanceiros.proLabore]);
+  const ultimosMeses = useMemo(() => computeUltimosMeses(monthAnchor), [transacoes, monthAnchor, metas]);
+  const ultimosMesesRelatorio = useMemo(() => computeUltimosMeses(relatorioMes), [transacoes, relatorioMes, metas]);
 
   const anoAtual = monthAnchor.slice(0, 4);
   const faturamentoAnual = useMemo(() => {
@@ -2830,19 +2860,33 @@ export default function App() {
   const reservaAcumulada = useMemo(() => computeReservaAcumulada(monthAnchor), [transacoes, monthAnchor]);
   const relatorioReservaAcumulada = useMemo(() => computeReservaAcumulada(relatorioMes), [transacoes, relatorioMes]);
 
+  function computeReservaDoMes(mes) {
+    const num = (v) => parseFloat(v) || 0;
+    return transacoes
+      .filter((t) => t.tipo === "Despesa" && t.categoria === "Reserva" && t.statusPagamento === "Pago" && mesRef(t.data) === mes)
+      .reduce((s, t) => s + num(t.valor), 0);
+  }
+  const reservaDoMes = useMemo(() => computeReservaDoMes(monthAnchor), [transacoes, monthAnchor]);
+  const relatorioReservaDoMes = useMemo(() => computeReservaDoMes(relatorioMes), [transacoes, relatorioMes]);
+
+  function corReservaDoMes(valorDoMes, valorSugerido) {
+    if (valorDoMes <= 0) return "var(--red)";
+    if (valorDoMes < valorSugerido) return "var(--amber)";
+    return "var(--teal)";
+  }
+
   function computeSaudeFinanceira(statsMes, saldoAcum, ultimosMesesArr) {
-    const faturado = statsMes.totalReceita;
+    const faturado = statsMes.recebido;
     const despesasOperacionais = statsMes.totalDespesas;
     const impostoValor = (faturado * (parseFloat(parametrosFinanceiros.pctImposto) || 0)) / 100;
-    const proLaboreValor = parseFloat(parametrosFinanceiros.proLabore) || 0;
     const reservaValor = (faturado * (parseFloat(parametrosFinanceiros.pctReserva) || 0)) / 100;
-    const sobraLivre = faturado - despesasOperacionais - impostoValor - proLaboreValor - reservaValor;
+    const sobraLivre = faturado - despesasOperacionais - impostoValor;
     const mediaDespesas = ultimosMesesArr.reduce((s, m) => s + m.totalDespesas, 0) / (ultimosMesesArr.length || 1);
-    const custoMensalTotal = mediaDespesas + proLaboreValor;
+    const custoMensalTotal = mediaDespesas;
     const mesesGarantidos = custoMensalTotal > 0 ? saldoAcum / custoMensalTotal : null;
     const reservaIdealValor = custoMensalTotal * MESES_RESERVA_IDEAL;
     const pctDaReservaIdeal = reservaIdealValor > 0 ? (saldoAcum / reservaIdealValor) * 100 : null;
-    return { faturado, despesasOperacionais, impostoValor, proLaboreValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal };
+    return { faturado, despesasOperacionais, impostoValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal };
   }
   const saudeFinanceiraMes = useMemo(
     () => computeSaudeFinanceira(financeStatsMes, saldoAcumulado, ultimosMeses),
@@ -3102,8 +3146,6 @@ export default function App() {
         .gauge-sublabel { fill: var(--text-dim); font-size: 9px; }
         .gauge-label { font-size: 11.5px; color: var(--text-dim); text-align: center; }
         .metas-line b { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
-        .reserva-destinar-row { display: flex; gap: 6px; margin-top: 12px; }
-        .reserva-destinar-row input { flex: 1; min-width: 0; }
         .kanban-inbox-bar {
           display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 14px;
           background: rgba(217,164,65,0.06); border: 1px dashed var(--amber); border-radius: 12px;
@@ -4416,7 +4458,7 @@ export default function App() {
 
               <div className="finance-panel">
                 <h3 className="config-section-title">Resumo financeiro — {mesLabel(monthAnchor)}</h3>
-                {!parametrosFinanceiros.pctImposto && !parametrosFinanceiros.proLabore && !parametrosFinanceiros.pctReserva && (
+                {!parametrosFinanceiros.pctImposto && !parametrosFinanceiros.pctReserva && (
                   <p className="config-hint" style={{ marginBottom: 16 }}>
                     Configure imposto, pró-labore e reserva em Configurações → Saúde financeira pra refinar esse resumo.
                   </p>
@@ -4425,24 +4467,13 @@ export default function App() {
                   <div className="metas-card">
                     <h4>Distribuição do faturamento</h4>
                     <div className="metas-line"><span>Faturado</span><b>R$ {saudeFinanceiraMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Despesas operacionais</span><b>- R$ {saudeFinanceiraMes.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {saudeFinanceiraMes.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Pró-labore</span><b>- R$ {saudeFinanceiraMes.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Reserva/investimento ({parametrosFinanceiros.pctReserva || 0}%)</span><b>- R$ {saudeFinanceiraMes.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="reserva-destinar-row">
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder={"Sugestão: " + saudeFinanceiraMes.reservaValor.toFixed(2)}
-                        value={reservaDestinarInput}
-                        onChange={(e) => setReservaDestinarInput(e.target.value)}
-                      />
-                      <button
-                        className="btn-ghost"
-                        onClick={() => { destinarReserva(reservaDestinarInput || saudeFinanceiraMes.reservaValor); setReservaDestinarInput(""); }}
-                      >
-                        Destinar à reserva
-                      </button>
+                    <div className="metas-line"><span>Despesas</span><b>- R$ {saudeFinanceiraMes.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line">
+                      <span>Reserva (sugestão: R$ {saudeFinanceiraMes.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 0 })})</span>
+                      <b style={{ color: corReservaDoMes(reservaDoMes, saudeFinanceiraMes.reservaValor) }}>
+                        R$ {reservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </b>
                     </div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
@@ -4459,7 +4490,7 @@ export default function App() {
                       <span>Meses garantidos</span>
                       <b>{saudeFinanceiraMes.mesesGarantidos == null ? "—" : saudeFinanceiraMes.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses"}</b>
                     </div>
-                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                    <div className="metas-line">
                       <span>Reserva ideal ({MESES_RESERVA_IDEAL} meses de custo)</span>
                       <b>R$ {saudeFinanceiraMes.reservaIdealValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
@@ -4471,16 +4502,10 @@ export default function App() {
                         </b>
                       </div>
                     )}
-                  </div>
-                  <div className="metas-card">
-                    <h4>Reserva da empresa</h4>
-                    <div className="metas-line">
-                      <span>Total destinado até {mesLabel(monthAnchor)}</span>
+                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                      <span>Reserva destinada até {mesLabel(monthAnchor)}</span>
                       <b>R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
-                    <p className="config-hint" style={{ marginTop: 10 }}>
-                      Soma de todas as despesas pagas categorizadas como "Reserva". Destine um valor na Distribuição do faturamento, ao lado.
-                    </p>
                   </div>
                 </div>
               </div>
@@ -4777,10 +4802,14 @@ export default function App() {
                   <div className="metas-card">
                     <h4>Distribuição do faturamento</h4>
                     <div className="metas-line"><span>Faturado</span><b>R$ {relatorioSaudeFinanceira.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Despesas operacionais</span><b>- R$ {relatorioSaudeFinanceira.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {relatorioSaudeFinanceira.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Pró-labore</span><b>- R$ {relatorioSaudeFinanceira.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Reserva/investimento ({parametrosFinanceiros.pctReserva || 0}%)</span><b>- R$ {relatorioSaudeFinanceira.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Despesas</span><b>- R$ {relatorioSaudeFinanceira.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line">
+                      <span>Reserva (sugestão: R$ {relatorioSaudeFinanceira.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 0 })})</span>
+                      <b style={{ color: corReservaDoMes(relatorioReservaDoMes, relatorioSaudeFinanceira.reservaValor) }}>
+                        R$ {relatorioReservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </b>
+                    </div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
                       <b style={{ color: relatorioSaudeFinanceira.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
@@ -4796,7 +4825,7 @@ export default function App() {
                       <span>Meses garantidos</span>
                       <b>{relatorioSaudeFinanceira.mesesGarantidos == null ? "—" : relatorioSaudeFinanceira.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses"}</b>
                     </div>
-                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                    <div className="metas-line">
                       <span>Reserva ideal ({MESES_RESERVA_IDEAL} meses de custo)</span>
                       <b>R$ {relatorioSaudeFinanceira.reservaIdealValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
@@ -4808,11 +4837,8 @@ export default function App() {
                         </b>
                       </div>
                     )}
-                  </div>
-                  <div className="metas-card">
-                    <h4>Reserva da empresa</h4>
-                    <div className="metas-line">
-                      <span>Total destinado até {mesLabel(relatorioMes)}</span>
+                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
+                      <span>Reserva destinada até {mesLabel(relatorioMes)}</span>
                       <b>R$ {relatorioReservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
                   </div>
@@ -4974,27 +5000,6 @@ export default function App() {
                     <p className="config-hint" style={{ marginTop: 8 }}>% do faturamento do mês reservado pro Simples Nacional / DAS.</p>
                   </div>
                   <div className="metas-card">
-                    <h4>Pró-labore mensal</h4>
-                    <div className="metas-input-row">
-                      <input
-                        type="number"
-                        min="0"
-                        step="100"
-                        placeholder="Ex: 3000"
-                        value={proLaboreInput}
-                        onChange={(e) => setProLaboreInput(e.target.value)}
-                      />
-                      <button
-                        className="btn-primary"
-                        style={{ marginLeft: 0 }}
-                        onClick={() => salvarParametrosFinanceiros({ proLabore: parseFloat(proLaboreInput) || 0 })}
-                      >
-                        Salvar
-                      </button>
-                    </div>
-                    <p className="config-hint" style={{ marginTop: 8 }}>Valor fixo em R$ que você retira todo mês.</p>
-                  </div>
-                  <div className="metas-card">
                     <h4>Reserva / investimento</h4>
                     <div className="metas-input-row">
                       <input
@@ -5014,6 +5019,38 @@ export default function App() {
                       </button>
                     </div>
                     <p className="config-hint" style={{ marginTop: 8 }}>% do faturamento do mês reservado pra investir ou guardar de reserva.</p>
+                  </div>
+                </div>
+                <p className="config-hint" style={{ marginTop: 24, fontWeight: 600, color: "var(--text)" }}>Pró-labore mensal</p>
+                <div className="month-nav" style={{ margin: "12px 0" }}>
+                  <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, -1))}><ChevronLeft size={14} /></button>
+                  <div className="month-nav-label">{mesLabel(monthAnchor)}</div>
+                  <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, 1))}><ChevronRight size={14} /></button>
+                  <button className="btn-ghost kanban-today-btn" onClick={() => setMonthAnchor(mesRef(todayISO()))}>Mês atual</button>
+                </div>
+                <div className="metas-grid">
+                  <div className="metas-card">
+                    <h4>Pró-labore — {mesLabel(monthAnchor)}</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        placeholder="Ex: 3000"
+                        value={proLaboreMesInput}
+                        onChange={(e) => setProLaboreMesInput(e.target.value)}
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => confirmarProLaboreMes(monthAnchor, proLaboreMesInput)}
+                      >
+                        Confirmar
+                      </button>
+                    </div>
+                    <p className="config-hint" style={{ marginTop: 8 }}>
+                      Valor que você retira nesse mês. Ao confirmar, uma despesa "Pró-labore" é lançada automaticamente no Financeiro.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -5781,7 +5818,7 @@ export default function App() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>
               {transacoes.some((t) => t.id === transacaoForm.id) ? "Editar transação" : "Nova " + transacaoForm.tipo.toLowerCase()}
-              <X size={18} style={{ cursor: "pointer" }} onClick={() => { setTransacaoForm(null); setParcelasInput(1); }} />
+              <X size={18} style={{ cursor: "pointer" }} onClick={() => { setTransacaoForm(null); setParcelasInput(1); setRepeticaoFreq("mensal"); }} />
             </h3>
             <div className="grid2">
               <div className="field">
@@ -5827,7 +5864,7 @@ export default function App() {
             </div>
             <div className="grid2">
               <div className="field">
-                <label>Valor (R$){transacaoForm.parcelaGrupoId ? "" : parcelasInput > 1 ? " — mensal" : ""}</label>
+                <label>Valor (R$){transacaoForm.parcelaGrupoId ? "" : parcelasInput > 1 ? " — " + FREQUENCIA_LABEL[transacaoForm.tipo === "Despesa" ? repeticaoFreq : "mensal"] : ""}</label>
                 <input type="number" min="0" step="0.01" value={transacaoForm.valor} onChange={(e) => setTransacaoForm({ ...transacaoForm, valor: e.target.value })} />
               </div>
               <div className="field">
@@ -5843,7 +5880,34 @@ export default function App() {
                 </select>
               </div>
             )}
-            {!transacoes.some((t) => t.id === transacaoForm.id) && !transacaoForm.parcelaGrupoId && (
+            {!transacoes.some((t) => t.id === transacaoForm.id) && !transacaoForm.parcelaGrupoId && transacaoForm.tipo === "Despesa" && (
+              <div className="field">
+                <label>Repetição (opcional)</label>
+                <div className="grid2">
+                  <select value={repeticaoFreq} onChange={(e) => setRepeticaoFreq(e.target.value)}>
+                    <option value="mensal">Mensalmente</option>
+                    <option value="semanal">Semanalmente</option>
+                    <option value="semestral">Semestralmente</option>
+                    <option value="anual">Anualmente</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    max="48"
+                    placeholder="Quantidade de repetições"
+                    value={parcelasInput}
+                    onChange={(e) => setParcelasInput(Math.max(1, parseInt(e.target.value) || 1))}
+                  />
+                </div>
+                {parcelasInput > 1 && (
+                  <div className="lock-note">
+                    <Archive size={12} />
+                    Serão criadas {parcelasInput} transações ({FREQUENCIA_LABEL[repeticaoFreq]}) de R$ {(parseFloat(transacaoForm.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} cada (total R$ {((parseFloat(transacaoForm.valor) || 0) * parcelasInput).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}), a partir do vencimento acima.
+                  </div>
+                )}
+              </div>
+            )}
+            {!transacoes.some((t) => t.id === transacaoForm.id) && !transacaoForm.parcelaGrupoId && transacaoForm.tipo === "Receita" && (
               <div className="field">
                 <label>Parcelar em quantas vezes? (opcional — para compras parceladas)</label>
                 <input
@@ -5892,11 +5956,11 @@ export default function App() {
               <textarea value={transacaoForm.observacoes} onChange={(e) => setTransacaoForm({ ...transacaoForm, observacoes: e.target.value })} />
             </div>
             <div className="modal-actions">
-              <button className="btn-ghost" onClick={() => { setTransacaoForm(null); setParcelasInput(1); }}>Cancelar</button>
+              <button className="btn-ghost" onClick={() => { setTransacaoForm(null); setParcelasInput(1); setRepeticaoFreq("mensal"); }}>Cancelar</button>
               <button
                 className="btn-primary"
                 style={{ marginLeft: 0 }}
-                onClick={() => saveTransacao({ ...transacaoForm, valor: transacaoForm.valor || "0" }, parcelasInput)}
+                onClick={() => saveTransacao({ ...transacaoForm, valor: transacaoForm.valor || "0" }, parcelasInput, transacaoForm.tipo === "Despesa" ? repeticaoFreq : "mensal")}
               >
                 Salvar
               </button>

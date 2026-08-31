@@ -490,6 +490,9 @@ export const syncMetasAnuais = (prev, next) => syncMetas("metas_anuais", "ano", 
 export const syncMetasClientesMensais = (prev, next) =>
   syncMetas("metas_clientes_mensais", "mes", prev, next, (v) => intOrNull(v) ?? 0);
 
+export const listProLaboreMensal = () => listMetas("pro_labore_mensal", "mes");
+export const syncProLaboreMensal = (prev, next) => syncMetas("pro_labore_mensal", "mes", prev, next, (v) => num(v));
+
 // ---------------- Status de demandas ----------------
 
 function statusDemandaToRow(s) {
@@ -532,7 +535,6 @@ export async function getParametrosFinanceiros() {
   const r = res.data;
   return {
     pctImposto: r ? Number(r.pct_imposto) || 0 : 0,
-    proLabore: r ? Number(r.pro_labore) || 0 : 0,
     pctReserva: r ? Number(r.pct_reserva) || 0 : 0,
   };
 }
@@ -542,7 +544,6 @@ export async function setParametrosFinanceiros(p) {
     await supabase.from("parametros_financeiros").upsert({
       user_id: user.id,
       pct_imposto: num(p.pctImposto),
-      pro_labore: num(p.proLabore),
       pct_reserva: num(p.pctReserva),
     })
   );
