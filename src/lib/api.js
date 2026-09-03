@@ -536,6 +536,7 @@ export async function getParametrosFinanceiros() {
   return {
     pctImposto: r ? Number(r.pct_imposto) || 0 : 0,
     pctReserva: r ? Number(r.pct_reserva) || 0 : 0,
+    pctInss: r && r.pct_inss != null ? Number(r.pct_inss) || 0 : 11,
   };
 }
 export async function setParametrosFinanceiros(p) {
@@ -545,6 +546,7 @@ export async function setParametrosFinanceiros(p) {
       user_id: user.id,
       pct_imposto: num(p.pctImposto),
       pct_reserva: num(p.pctReserva),
+      pct_inss: num(p.pctInss),
     })
   );
 }

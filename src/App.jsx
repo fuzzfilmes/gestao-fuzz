@@ -1250,17 +1250,19 @@ export default function App() {
   const [metaInputValue, setMetaInputValue] = useState("");
   const [metaAnualInputValue, setMetaAnualInputValue] = useState("");
   const [metaClientesInputValue, setMetaClientesInputValue] = useState("");
-  const [parametrosFinanceiros, setParametrosFinanceiros] = useState({ pctImposto: 0, pctReserva: 0 });
+  const [parametrosFinanceiros, setParametrosFinanceiros] = useState({ pctImposto: 0, pctReserva: 0, pctInss: 11 });
   const parametrosFinanceirosRef = useRef(parametrosFinanceiros);
   parametrosFinanceirosRef.current = parametrosFinanceiros;
   const [pctImpostoInput, setPctImpostoInput] = useState("");
   const [pctReservaInput, setPctReservaInput] = useState("");
+  const [pctInssInput, setPctInssInput] = useState("");
   const [proLaborePorMes, setProLaborePorMes] = useState({});
   const [proLaboreMesInput, setProLaboreMesInput] = useState("");
 
   useEffect(() => {
     setPctImpostoInput(parametrosFinanceiros.pctImposto ? String(parametrosFinanceiros.pctImposto) : "");
     setPctReservaInput(parametrosFinanceiros.pctReserva ? String(parametrosFinanceiros.pctReserva) : "");
+    setPctInssInput(parametrosFinanceiros.pctInss != null ? String(parametrosFinanceiros.pctInss) : "");
   }, [parametrosFinanceiros]);
 
   useEffect(() => {
@@ -1382,7 +1384,7 @@ export default function App() {
         load("metas", api.listMetasMensais, setMetas, {}),
         load("metas anuais", api.listMetasAnuais, setMetasAnuais, {}),
         load("meta de clientes", api.listMetasClientesMensais, setMetasClientesNovos, {}),
-        load("parâmetros financeiros", api.getParametrosFinanceiros, setParametrosFinanceiros, { pctImposto: 0, pctReserva: 0 }),
+        load("parâmetros financeiros", api.getParametrosFinanceiros, setParametrosFinanceiros, { pctImposto: 0, pctReserva: 0, pctInss: 11 }),
         load("pró-labore mensal", api.listProLaboreMensal, setProLaborePorMes, {}),
         load("tags", api.listTags, setTags, []),
         load("equipamentos", api.listEquipamentos, setEquipamentos, []),
@@ -1742,26 +1744,49 @@ export default function App() {
   function confirmarProLaboreMes(mes, valorStr) {
     const valor = parseFloat(valorStr) || 0;
     persistProLaborePorMes({ ...proLaborePorMes, [mes]: valor });
-    const id = "prolabore_" + mes;
-    const existente = transacoesRef.current.find((t) => t.id === id);
+    const idProLabore = "prolabore_" + mes;
+    const idInss = "inss_" + mes;
+    let list = transacoesRef.current;
     if (valor <= 0) {
-      if (existente) persistTransacoes(transacoesRef.current.filter((t) => t.id !== id));
+      persistTransacoes(list.filter((t) => t.id !== idProLabore && t.id !== idInss));
       return;
     }
     if (!tags.some((tg) => tg.nome === "Pró Labore")) createTag("Pró Labore", "#9B87C4");
-    const dados = {
+    if (!tags.some((tg) => tg.nome === "INSS")) createTag("INSS", "#E07BB5");
+    const existenteProLabore = list.find((t) => t.id === idProLabore);
+    const dadosProLabore = {
       ...emptyTransacao("Despesa"),
-      id,
+      id: idProLabore,
       descricao: "Pró-labore " + mesLabel(mes),
       categoria: "Pró Labore",
       natureza: "Fixa",
       valor: String(valor),
       data: mes + "-05",
-      statusPagamento: existente ? existente.statusPagamento : "Pendente",
+      statusPagamento: existenteProLabore ? existenteProLabore.statusPagamento : "Pendente",
     };
-    const list = existente
-      ? transacoesRef.current.map((t) => (t.id === id ? { ...t, ...dados } : t))
-      : [dados, ...transacoesRef.current];
+    list = existenteProLabore
+      ? list.map((t) => (t.id === idProLabore ? { ...t, ...dadosProLabore } : t))
+      : [dadosProLabore, ...list];
+
+    const valorInss = (valor * (parseFloat(parametrosFinanceirosRef.current.pctInss) || 0)) / 100;
+    const existenteInss = list.find((t) => t.id === idInss);
+    if (valorInss <= 0) {
+      list = list.filter((t) => t.id !== idInss);
+    } else {
+      const dadosInss = {
+        ...emptyTransacao("Despesa"),
+        id: idInss,
+        descricao: "INSS " + mesLabel(mes),
+        categoria: "INSS",
+        natureza: "Fixa",
+        valor: String(valorInss),
+        data: mes + "-05",
+        statusPagamento: existenteInss ? existenteInss.statusPagamento : "Pendente",
+      };
+      list = existenteInss
+        ? list.map((t) => (t.id === idInss ? { ...t, ...dadosInss } : t))
+        : [dadosInss, ...list];
+    }
     persistTransacoes(list);
   }
 
@@ -2591,9 +2616,10 @@ export default function App() {
     const despesasFixas = despesas.filter((t) => t.natureza === "Fixa").reduce((s, t) => s + num(t.valor), 0);
     const despesasVariaveis = totalDespesas - despesasFixas;
     const proLaboreValor = despesas.filter((t) => t.categoria === "Pró Labore").reduce((s, t) => s + num(t.valor), 0);
+    const inssValor = despesas.filter((t) => t.categoria === "INSS").reduce((s, t) => s + num(t.valor), 0);
     const margem = totalReceita - totalDespesas;
     const margemPct = totalReceita > 0 ? (margem / totalReceita) * 100 : 0;
-    return { mes, totalReceita, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasFixas, despesasVariaveis, proLaboreValor, margem, margemPct };
+    return { mes, totalReceita, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasFixas, despesasVariaveis, proLaboreValor, inssValor, margem, margemPct };
   }
 
   const financeStats = useMemo(() => {
@@ -2886,7 +2912,9 @@ export default function App() {
     const mesesGarantidos = custoMensalTotal > 0 ? saldoAcum / custoMensalTotal : null;
     const reservaIdealValor = custoMensalTotal * MESES_RESERVA_IDEAL;
     const pctDaReservaIdeal = reservaIdealValor > 0 ? (saldoAcum / reservaIdealValor) * 100 : null;
-    return { faturado, despesasOperacionais, impostoValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal };
+    const inssValor = statsMes.inssValor;
+    const fatorRMinimo = faturado * 0.28;
+    return { faturado, despesasOperacionais, impostoValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal, inssValor, fatorRMinimo };
   }
   const saudeFinanceiraMes = useMemo(
     () => computeSaudeFinanceira(financeStatsMes, saldoAcumulado, ultimosMeses),
@@ -4475,6 +4503,8 @@ export default function App() {
                         R$ {reservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </b>
                     </div>
+                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore)</span><b>R$ {saudeFinanceiraMes.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span style={{ color: "var(--text-dim)" }}>Fator R — mínimo sugerido (28% do faturado)</span><b style={{ color: "var(--text-dim)" }}>R$ {saudeFinanceiraMes.fatorRMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
                       <b style={{ color: saudeFinanceiraMes.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
@@ -4810,6 +4840,8 @@ export default function App() {
                         R$ {relatorioReservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </b>
                     </div>
+                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore)</span><b>R$ {relatorioSaudeFinanceira.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span style={{ color: "var(--text-dim)" }}>Fator R — mínimo sugerido (28% do faturado)</span><b style={{ color: "var(--text-dim)" }}>R$ {relatorioSaudeFinanceira.fatorRMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
                       <b style={{ color: relatorioSaudeFinanceira.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
@@ -5020,6 +5052,27 @@ export default function App() {
                     </div>
                     <p className="config-hint" style={{ marginTop: 8 }}>% do faturamento do mês reservado pra investir ou guardar de reserva.</p>
                   </div>
+                  <div className="metas-card">
+                    <h4>INSS sobre pró-labore</h4>
+                    <div className="metas-input-row">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="Ex: 11 (%)"
+                        value={pctInssInput}
+                        onChange={(e) => setPctInssInput(e.target.value)}
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => salvarParametrosFinanceiros({ pctInss: parseFloat(pctInssInput) || 0 })}
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                    <p className="config-hint" style={{ marginTop: 8 }}>% do pró-labore pago de INSS. Ao confirmar o pró-labore do mês, uma despesa "INSS" é lançada junto.</p>
+                  </div>
                 </div>
                 <p className="config-hint" style={{ marginTop: 24, fontWeight: 600, color: "var(--text)" }}>Pró-labore mensal</p>
                 <div className="month-nav" style={{ margin: "12px 0" }}>
@@ -5050,6 +5103,16 @@ export default function App() {
                     </div>
                     <p className="config-hint" style={{ marginTop: 8 }}>
                       Valor que você retira nesse mês. Ao confirmar, uma despesa "Pró-labore" é lançada automaticamente no Financeiro.
+                    </p>
+                  </div>
+                  <div className="metas-card">
+                    <h4>Fator R — {mesLabel(monthAnchor)}</h4>
+                    <div className="metas-line">
+                      <span>28% do faturado nesse mês</span>
+                      <b>R$ {(financeStatsMes.totalReceita * 0.28).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                    </div>
+                    <p className="config-hint" style={{ marginTop: 8 }}>
+                      Referência: nos CNAEs que emitem NF, o pró-labore precisa ser igual ou maior que 28% do faturamento pra manter a alíquota de imposto melhor. Não altera o valor do pró-labore acima — é só pra consulta (cálculo provisório, a contabilidade vai ajustar o método em breve).
                     </p>
                   </div>
                 </div>
