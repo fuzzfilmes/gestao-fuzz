@@ -3395,6 +3395,14 @@ export default function App() {
         .rail-tag { font-size: 9.5px; background: var(--border); padding: 1px 6px; border-radius: 4px; margin-left: auto; flex-shrink: 0; }
         .rail-tag-alert { background: var(--red); color: #2a0a07; font-weight: 700; }
         .rail-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 10px 6px; }
+        @media (max-width: 680px) {
+          .rail { width: 56px; padding: 0 6px 12px 6px; }
+          .brand-block { padding: 16px 0 12px 0; display: flex; justify-content: center; }
+          .brand-logo-img { height: 24px; }
+          .rail-label { display: none; }
+          .rail-btn { justify-content: center; padding: 10px 4px; gap: 0; position: relative; }
+          .rail-tag { position: absolute; margin-left: 0; top: 4px; right: 4px; }
+        }
         .toast {
           position: absolute; top: 14px; right: 20px; z-index: 40;
           background: var(--teal-dark); border: 1px solid var(--teal); color: var(--teal);
