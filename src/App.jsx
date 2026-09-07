@@ -3402,6 +3402,18 @@ export default function App() {
           .rail-label { display: none; }
           .rail-btn { justify-content: center; padding: 10px 4px; gap: 0; position: relative; }
           .rail-tag { position: absolute; margin-left: 0; top: 4px; right: 4px; }
+          .slate { padding: 4px 14px 0 14px; }
+          .notifications-row { margin: 4px 14px 0 14px; }
+          .main { padding: 14px; }
+          .stats-row { padding: 12px 14px; gap: 8px; }
+          .finance-cards, .home-quick-stats { gap: 8px; }
+          .stat, .finance-cards .stat, .home-quick-stats .stat { min-width: 0; flex: 1 1 30%; padding: 10px 12px; }
+          .followup-banner { flex: 1 1 100%; max-width: none; min-width: 0; }
+          .followup-banner span { min-width: 0; flex-shrink: 1; }
+          .table-scroll { overflow-x: auto; }
+          .home-grid { grid-template-columns: 1fr; }
+          .finance-top-grid { flex-wrap: wrap; }
+          .home-row-sub { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         }
         .toast {
           position: absolute; top: 14px; right: 20px; z-index: 40;
@@ -3893,7 +3905,7 @@ export default function App() {
               {filteredDemands.length === 0 ? (
                 <div className="empty">Nenhuma demanda cadastrada ainda. Crie a primeira.</div>
               ) : (
-                <table>
+                <div className="table-scroll"><table>
                   <thead>
                     <tr>
                       <th style={{ width: 22 }}></th>
@@ -4023,7 +4035,7 @@ export default function App() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </>
           ) : tab === "clientes" ? (
@@ -4067,7 +4079,7 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <table>
+                <div className="table-scroll"><table>
                   <thead>
                     <tr>
                       <th>Nome</th>
@@ -4103,7 +4115,7 @@ export default function App() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </>
           ) : tab === "propostas-lista" ? (
@@ -4142,7 +4154,7 @@ export default function App() {
                       )}
                     </FilterMenu>
                   </div>
-                <table>
+                <div className="table-scroll"><table>
                   <thead>
                     <tr>
                       <th>Número</th>
@@ -4210,7 +4222,7 @@ export default function App() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table></div>
                 </>
               )}
             </>
@@ -4320,7 +4332,7 @@ export default function App() {
                 {filteredReceitas.length === 0 ? (
                   <div className="empty">Nenhuma receita neste mês. Receitas de propostas confirmadas aparecem automaticamente.</div>
                 ) : (
-                  <table>
+                  <div className="table-scroll"><table>
                     <thead>
                       <tr>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "descricao")}>Descrição {financeReceitasSortKey === "descricao" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
@@ -4369,7 +4381,7 @@ export default function App() {
                         );
                       })}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </div>
 
@@ -4411,7 +4423,7 @@ export default function App() {
                 {filteredDespesas.length === 0 ? (
                   <div className="empty">Nenhuma despesa neste mês.</div>
                 ) : (
-                  <table>
+                  <div className="table-scroll"><table>
                     <thead>
                       <tr>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "descricao")}>Descrição {financeDespesasSortKey === "descricao" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
@@ -4462,7 +4474,7 @@ export default function App() {
                         );
                       })}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </div>
 
@@ -4704,7 +4716,7 @@ export default function App() {
               {filteredEquipamentos.length === 0 ? (
                 <div className="empty">Nenhum equipamento cadastrado ainda.</div>
               ) : (
-                <table>
+                <div className="table-scroll"><table>
                   <thead>
                     <tr>
                       <th>Nome</th>
@@ -4757,7 +4769,7 @@ export default function App() {
                       <td></td>
                     </tr>
                   </tfoot>
-                </table>
+                </table></div>
               )}
             </>
           ) : tab === "kanban" ? (
@@ -4817,7 +4829,7 @@ export default function App() {
                 {relatorioReceitasPorTipo.length > 0 && (
                   <>
                     <h3 className="config-section-title" style={{ marginTop: 24 }}>Receitas por tipo</h3>
-                    <table>
+                    <div className="table-scroll"><table>
                       <thead><tr><th>Tipo de receita</th><th>Valor</th></tr></thead>
                       <tbody>
                         {relatorioReceitasPorTipo.map((r) => (
@@ -4827,7 +4839,7 @@ export default function App() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   </>
                 )}
               </ReportSection>
@@ -4886,7 +4898,7 @@ export default function App() {
                 {relatorioResumoPorCategoria.length > 0 && (
                   <>
                     <h3 className="config-section-title" style={{ marginTop: 24 }}>Despesas por categoria — {mesLabel(relatorioMes)}</h3>
-                    <table>
+                    <div className="table-scroll"><table>
                       <thead><tr><th>Categoria</th><th>Total</th></tr></thead>
                       <tbody>
                         {relatorioResumoPorCategoria.map((c) => (
@@ -4896,7 +4908,7 @@ export default function App() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   </>
                 )}
               </ReportSection>
