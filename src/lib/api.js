@@ -189,6 +189,7 @@ function propostaToRow(p) {
     cliente_nome: p.clienteNome || "",
     valor_total: num(p.valorTotal),
     data_geracao: n(p.dataGeracao),
+    data_confirmacao: n(p.dataConfirmacao),
     status: p.status || "Pendente",
   };
 }
@@ -202,6 +203,7 @@ function propostaFromRow(r) {
     clienteNome: r.cliente_nome,
     valorTotal: Number(r.valor_total) || 0,
     dataGeracao: r.data_geracao,
+    dataConfirmacao: r.data_confirmacao || "",
     status: r.status,
   };
 }

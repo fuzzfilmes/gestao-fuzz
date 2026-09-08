@@ -1312,6 +1312,20 @@ export default function App() {
   const [categoriaEquipEditando, setCategoriaEquipEditando] = useState(null);
   const [categoriaEquipEditValue, setCategoriaEquipEditValue] = useState("");
   const [hideValues, setHideValues] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("railCollapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("railCollapsed", railCollapsed ? "1" : "0");
+    } catch {
+      // ignora — localStorage indisponível não deve quebrar o app
+    }
+  }, [railCollapsed]);
   const [dismissedNotifications, setDismissedNotifications] = useState(() => new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1573,7 +1587,7 @@ export default function App() {
       observacoes: "Gerada a partir da Proposta nº " + prop.numero + (prop.valorTotal ? " — valor: R$ " + prop.valorTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""),
     };
     persistDemands([novaDemanda, ...demandsRef.current]);
-    persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Confirmada" } : p)));
+    persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Confirmada", dataConfirmacao: todayISO() } : p)));
 
     const clienteVinculado = clientsRef.current.find((c) => c.id === prop.clienteId);
     if (clienteVinculado && clienteVinculado.rascunho) {
@@ -2464,17 +2478,25 @@ export default function App() {
     [proposals, relatorioMes]
   );
 
+  // Confirmadas contam pelo mês em que foram confirmadas, não pelo mês
+  // em que a proposta foi enviada — uma proposta enviada em agosto e
+  // confirmada em setembro entra no relatório de setembro. Propostas
+  // confirmadas antes dessa mudança (sem dataConfirmacao salva) caem
+  // de volta em dataGeracao, pra não sumirem dos relatórios antigos.
+  const relatorioPropostasConfirmadasNoMes = useMemo(
+    () => proposals.filter((p) => p.status === "Confirmada" && mesRef(p.dataConfirmacao || p.dataGeracao) === relatorioMes),
+    [proposals, relatorioMes]
+  );
+
   const relatorioPropostaStats = useMemo(() => {
     const pendentes = relatorioPropostasDoMes.filter((p) => p.status === "Pendente").length;
-    const confirmadas = relatorioPropostasDoMes.filter((p) => p.status === "Confirmada").length;
     const recusadas = relatorioPropostasDoMes.filter((p) => p.status === "Recusada").length;
+    const confirmadas = relatorioPropostasConfirmadasNoMes.length;
     const decididas = confirmadas + recusadas;
     const taxaConversao = decididas > 0 ? Math.round((confirmadas / decididas) * 100) : 0;
-    const valorConfirmado = relatorioPropostasDoMes
-      .filter((p) => p.status === "Confirmada")
-      .reduce((s, p) => s + Number(p.valorTotal || 0), 0);
+    const valorConfirmado = relatorioPropostasConfirmadasNoMes.reduce((s, p) => s + Number(p.valorTotal || 0), 0);
     return { total: relatorioPropostasDoMes.length, pendentes, confirmadas, recusadas, taxaConversao, valorConfirmado };
-  }, [relatorioPropostasDoMes]);
+  }, [relatorioPropostasDoMes, relatorioPropostasConfirmadasNoMes]);
 
   const relatorioDemandasDoMes = useMemo(() => {
     const set = new Set();
@@ -3377,7 +3399,29 @@ export default function App() {
           flex-shrink: 0;
           display: flex;
           flex-direction: column;
+          max-height: 100vh;
+          overflow-y: auto;
+          scrollbar-width: none;
         }
+        .rail::-webkit-scrollbar { display: none; }
+        .right-col { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+        .right-col::-webkit-scrollbar { width: 8px; }
+        .right-col::-webkit-scrollbar-track { background: transparent; }
+        .right-col::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        .rail-collapse-btn {
+          display: flex; align-items: center; justify-content: center;
+          width: 100%; padding: 6px 0; margin-bottom: 8px;
+          background: none; border: 1px solid var(--border); border-radius: 8px;
+          color: var(--text-dim); cursor: pointer; flex-shrink: 0;
+          transition: background 0.15s, color 0.15s;
+        }
+        .rail-collapse-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+        .rail.collapsed { width: 56px; padding: 0 6px 12px 6px; }
+        .rail.collapsed .brand-block { padding: 16px 0 12px 0; display: flex; justify-content: center; }
+        .rail.collapsed .brand-logo-img { height: 24px; }
+        .rail.collapsed .rail-label { display: none; }
+        .rail.collapsed .rail-btn { justify-content: center; padding: 10px 4px; gap: 0; position: relative; }
+        .rail.collapsed .rail-tag { position: absolute; margin-left: 0; top: 4px; right: 4px; }
         .rail-btn {
           display: flex; align-items: center; gap: 10px;
           padding: 10px 12px; border-radius: 10px; cursor: pointer;
@@ -3414,6 +3458,10 @@ export default function App() {
           .home-grid { grid-template-columns: 1fr; }
           .finance-top-grid { flex-wrap: wrap; }
           .home-row-sub { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          #root { padding: 0; }
+          .app { border-radius: 0; border: none; box-shadow: none; height: 100vh; min-height: 100vh; }
+          .shell { height: 100%; min-height: 0; }
+          .right-col { overflow-y: auto; min-height: 0; }
         }
         .toast {
           position: absolute; top: 14px; right: 20px; z-index: 40;
@@ -3548,10 +3596,17 @@ export default function App() {
 
 
       <div className="shell">
-        <div className="rail">
+        <div className={"rail" + (railCollapsed ? " collapsed" : "")}>
           <div className="brand-block">
             <img src={fuzzLogo} alt="fuzz" className="brand-logo-img" />
           </div>
+          <button
+            className="rail-collapse-btn"
+            onClick={() => setRailCollapsed(!railCollapsed)}
+            title={railCollapsed ? "Expandir menu" : "Recolher menu"}
+          >
+            {railCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+          </button>
           <button className={"rail-btn " + (tab === "inicio" ? "active" : "")} onClick={() => setTab("inicio")}>
             <Home size={16} /> <span className="rail-label">Início</span>
           </button>
