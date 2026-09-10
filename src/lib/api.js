@@ -51,6 +51,7 @@ function clienteToRow(c) {
     contato_nome: c.contatoNome || "",
     email: c.email || "",
     telefone: c.telefone || "",
+    contatos: c.contatos || [],
     razao_social: c.razaoSocial || "",
     cnpj: c.cnpj || "",
     endereco: c.endereco || "",
@@ -73,6 +74,7 @@ function clienteFromRow(r) {
     contatoNome: r.contato_nome,
     email: r.email,
     telefone: r.telefone,
+    contatos: r.contatos || [],
     razaoSocial: r.razao_social,
     cnpj: r.cnpj,
     endereco: r.endereco,
@@ -94,6 +96,37 @@ export async function listClientes() {
 }
 export async function syncClientes(prevList, nextList) {
   return syncRows("clientes", prevList, nextList, clienteToRow);
+}
+
+// ---------------- Notas de reunião ----------------
+
+function notaReuniaoToRow(n2) {
+  return {
+    id: n2.id,
+    cliente_id: n2.clienteId || null,
+    cliente_nome_livre: n2.clienteNomeLivre || "",
+    titulo: n2.titulo || "",
+    data: n(n2.data),
+    conteudo: n2.conteudo || "",
+  };
+}
+function notaReuniaoFromRow(r) {
+  return {
+    id: r.id,
+    clienteId: r.cliente_id || "",
+    clienteNomeLivre: r.cliente_nome_livre || "",
+    titulo: r.titulo || "",
+    data: r.data || "",
+    conteudo: r.conteudo || "",
+  };
+}
+export async function listNotasReuniao() {
+  const res = await supabase.from("notas_reuniao").select("*").order("created_at", { ascending: false });
+  throwIfError(res);
+  return res.data.map(notaReuniaoFromRow);
+}
+export async function syncNotasReuniao(prevList, nextList) {
+  return syncRows("notas_reuniao", prevList, nextList, notaReuniaoToRow);
 }
 
 // ---------------- Demandas (+ demanda_itens) ----------------

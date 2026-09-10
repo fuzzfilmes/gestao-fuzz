@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank } from "lucide-react";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank, MessageCircle, NotebookText } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -48,6 +48,7 @@ const TAB_LABELS = {
   clientes: "Clientes",
   "propostas-lista": "Propostas",
   demandas: "Demandas",
+  reunioes: "Reuniões",
   kanban: "Kanban semanal",
   financeiro: "Financeiro",
   metas: "Metas",
@@ -62,6 +63,8 @@ const TAB_LABELS = {
 const RETENCAO_DIAS = 30;
 
 const CATEGORIAS_RECEITA = ["Produção", "Consultoria", "Outro"];
+const CATEGORIA_DESPESA_RESERVA = "Reserva";
+const TIPO_RECEITA_RETIRADA_RESERVA = "Retirada de Reserva";
 const STATUS_PAGAMENTO = ["Pendente", "Pago"];
 const NATUREZA_DESPESA = ["Variável", "Fixa"];
 const FREQUENCIA_LABEL = { mensal: "mensais", semanal: "semanais", semestral: "semestrais", anual: "anuais" };
@@ -292,6 +295,7 @@ const emptyClient = () => ({
   contatoNome: "",
   email: "",
   telefone: "",
+  contatos: [],
   razaoSocial: "",
   cnpj: "",
   endereco: "",
@@ -304,6 +308,15 @@ const emptyClient = () => ({
   observacoes: "",
   criadoEm: todayISO(),
   rascunho: false,
+});
+
+const emptyNotaReuniao = (clienteId = "") => ({
+  id: "nr_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+  clienteId,
+  clienteNomeLivre: "",
+  titulo: "",
+  data: todayISO(),
+  conteudo: "",
 });
 
 function fmtDate(iso) {
@@ -355,6 +368,13 @@ function demandaPeso(d) {
 function corStatusVideo(v, coresStatus) {
   if (v.status === "Não iniciado") return null;
   return corDoStatusComMapa(coresStatus, "video", v.status);
+}
+
+function linkWhatsApp(telefone) {
+  const digitos = (telefone || "").replace(/\D/g, "");
+  if (!digitos) return "";
+  const comDDI = digitos.length <= 11 ? "55" + digitos : digitos;
+  return "https://wa.me/" + comDDI;
 }
 
 const FOLLOWUP_DIAS = 7;
@@ -1195,6 +1215,7 @@ export default function App() {
   const [clients, setClients] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [transacoes, setTransacoes] = useState([]);
+  const [notasReuniao, setNotasReuniao] = useState([]);
   const [tiposProducao, setTiposProducao] = useState(DEFAULT_TIPOS);
   const [tiposReceita, setTiposReceita] = useState(DEFAULT_TIPOS_RECEITA);
   const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
@@ -1206,6 +1227,9 @@ export default function App() {
   const [clientForm, setClientForm] = useState(null);
   const [capaUploading, setCapaUploading] = useState(false);
   const [transacaoForm, setTransacaoForm] = useState(null);
+  const [retiradaReservaForm, setRetiradaReservaForm] = useState(null);
+  const [notaReuniaoForm, setNotaReuniaoForm] = useState(null);
+  const [notaReuniaoFiltroCliente, setNotaReuniaoFiltroCliente] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filterCliente, setFilterCliente] = useState("");
   const [demandTipoFilter, setDemandTipoFilter] = useState("");
@@ -1356,11 +1380,13 @@ export default function App() {
   const demandsRef = useRef(demands);
   const proposalsRef = useRef(proposals);
   const transacoesRef = useRef(transacoes);
+  const notasReuniaoRef = useRef(notasReuniao);
   const clientViewInfoRef = useRef(clientViewInfo);
   clientsRef.current = clients;
   demandsRef.current = demands;
   proposalsRef.current = proposals;
   transacoesRef.current = transacoes;
+  notasReuniaoRef.current = notasReuniao;
   clientViewInfoRef.current = clientViewInfo;
 
   useEffect(() => {
@@ -1379,6 +1405,7 @@ export default function App() {
         load("clientes", api.listClientes, setClients, []),
         load("propostas", api.listPropostas, setProposals, []),
         load("transações", api.listTransacoes, setTransacoes, []),
+        load("notas de reunião", api.listNotasReuniao, setNotasReuniao, []),
         load("tipos de produção", () => api.seedTiposProducaoSeVazio(DEFAULT_TIPOS), setTiposProducao, DEFAULT_TIPOS),
         load("tipos de receita", () => api.seedTiposReceitaSeVazio(DEFAULT_TIPOS_RECEITA), setTiposReceita, DEFAULT_TIPOS_RECEITA),
         load(
@@ -1579,14 +1606,16 @@ export default function App() {
   }
 
   function confirmarProposta(prop) {
+    const maiorOrdem = demandsRef.current.reduce((max, x) => Math.max(max, x.ordem || 0), 0);
     const novaDemanda = {
       ...emptyDemand(),
       projeto: prop.titulo,
       clienteId: prop.clienteId,
       tipo: prop.tipo,
+      ordem: maiorOrdem + 10,
       observacoes: "Gerada a partir da Proposta nº " + prop.numero + (prop.valorTotal ? " — valor: R$ " + prop.valorTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""),
     };
-    persistDemands([novaDemanda, ...demandsRef.current]);
+    persistDemands([...demandsRef.current, novaDemanda]);
     persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Confirmada", dataConfirmacao: todayISO() } : p)));
 
     const clienteVinculado = clientsRef.current.find((c) => c.id === prop.clienteId);
@@ -1599,13 +1628,13 @@ export default function App() {
         ...emptyTransacao("Receita"),
         descricao: prop.titulo,
         valor: String(prop.valorTotal),
-        data: todayISO(),
+        data: "",
         demandaId: novaDemanda.id,
         clienteId: prop.clienteId,
         tipoReceita: tiposReceita[0] || "",
         observacoes: "Gerada automaticamente a partir da Proposta nº " + prop.numero,
       };
-      persistTransacoes([novaReceita, ...transacoesRef.current]);
+      persistTransacoes([...transacoesRef.current, novaReceita]);
     }
 
     setToast("Proposta confirmada: demanda \"" + prop.titulo + "\" criada em Demandas" + (prop.valorTotal ? " e receita lançada em Financeiro." : "."));
@@ -1638,6 +1667,47 @@ export default function App() {
     } catch (e) {
       console.error("Falha ao salvar transações", e);
     }
+  }
+
+  function retirarDaReserva() {
+    const valor = parseFloat(retiradaReservaForm.valor) || 0;
+    if (valor <= 0) return;
+    addTipoReceita(TIPO_RECEITA_RETIRADA_RESERVA);
+    const nova = {
+      ...emptyTransacao("Receita"),
+      categoria: tiposProducao[0] || CATEGORIAS_RECEITA[0],
+      tipoReceita: TIPO_RECEITA_RETIRADA_RESERVA,
+      descricao: retiradaReservaForm.descricao.trim() || "Retirada da reserva",
+      valor: String(valor),
+      data: retiradaReservaForm.data || todayISO(),
+      statusPagamento: "Pago",
+    };
+    persistTransacoes([nova, ...transacoesRef.current]);
+    setRetiradaReservaForm(null);
+    setToast("Retirada de R$ " + valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) + " lançada no financeiro.");
+    setTimeout(() => setToast(null), 6000);
+  }
+
+  async function persistNotasReuniao(list) {
+    const prev = notasReuniaoRef.current;
+    setNotasReuniao(list);
+    try {
+      await api.syncNotasReuniao(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar notas de reunião", e);
+    }
+  }
+
+  function saveNotaReuniao(nota) {
+    const limpa = { ...nota, conteudo: nota.conteudo.trim(), titulo: nota.titulo.trim(), clienteNomeLivre: nota.clienteNomeLivre.trim() };
+    const exists = notasReuniaoRef.current.some((x) => x.id === limpa.id);
+    persistNotasReuniao(exists ? notasReuniaoRef.current.map((x) => (x.id === limpa.id ? limpa : x)) : [limpa, ...notasReuniaoRef.current]);
+    setNotaReuniaoForm(null);
+  }
+
+  function removeNotaReuniao(id) {
+    persistNotasReuniao(notasReuniaoRef.current.filter((x) => x.id !== id));
+    setConfirmDelete(null);
   }
 
   function addPeriodoToDate(iso, n, frequencia) {
@@ -2411,6 +2481,13 @@ export default function App() {
   const clientName = (id) => clients.find((c) => c.id === id)?.nome || "—";
   const corStatusDemanda = (nome) => statusDemandas.find((s) => s.nome === nome)?.cor || "#8a8f98";
 
+  const notasReuniaoFiltradas = useMemo(() => {
+    let list = notasReuniao;
+    if (notaReuniaoFiltroCliente === "__sem_cliente__") list = list.filter((n) => !n.clienteId);
+    else if (notaReuniaoFiltroCliente) list = list.filter((n) => n.clienteId === notaReuniaoFiltroCliente);
+    return [...list].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  }, [notasReuniao, notaReuniaoFiltroCliente]);
+
   const filteredDemands = useMemo(() => {
     const list = demands.filter((d) => {
       if (!mostrarFinalizadas && d.status === "Finalizada") return false;
@@ -2540,15 +2617,9 @@ export default function App() {
   }, [demands]);
 
   const demandasStatsMes = useMemo(() => {
-    const doMes = new Set();
-    let finalizadas = 0;
-    demands.forEach((d) => {
-      const prazoNoMes = mesRef(d.dataEntrega) === monthAnchor;
-      const entregueNoMes = d.status === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
-      if (prazoNoMes || entregueNoMes) doMes.add(d);
-      if (entregueNoMes) finalizadas += demandaPeso(d);
-    });
-    const total = Array.from(doMes).reduce((s, d) => s + demandaPeso(d), 0);
+    const doMes = demands.filter((d) => mesRef(d.dataEnvioAprovacao) === monthAnchor);
+    const total = doMes.reduce((s, d) => s + demandaPeso(d), 0);
+    const finalizadas = doMes.filter((d) => d.status === "Finalizada").reduce((s, d) => s + demandaPeso(d), 0);
     return { total, finalizadas };
   }, [demands, monthAnchor]);
 
@@ -2900,9 +2971,11 @@ export default function App() {
   function computeReservaAcumulada(ateMes) {
     const num = (v) => parseFloat(v) || 0;
     return transacoes.reduce((acc, t) => {
-      if (t.tipo !== "Despesa" || t.categoria !== "Reserva" || t.statusPagamento !== "Pago") return acc;
+      if (t.statusPagamento !== "Pago") return acc;
       if (mesRef(t.data) > ateMes) return acc;
-      return acc + num(t.valor);
+      if (t.tipo === "Despesa" && t.categoria === CATEGORIA_DESPESA_RESERVA) return acc + num(t.valor);
+      if (t.tipo === "Receita" && t.tipoReceita === TIPO_RECEITA_RETIRADA_RESERVA) return acc - num(t.valor);
+      return acc;
     }, 0);
   }
   const reservaAcumulada = useMemo(() => computeReservaAcumulada(monthAnchor), [transacoes, monthAnchor]);
@@ -2911,7 +2984,7 @@ export default function App() {
   function computeReservaDoMes(mes) {
     const num = (v) => parseFloat(v) || 0;
     return transacoes
-      .filter((t) => t.tipo === "Despesa" && t.categoria === "Reserva" && t.statusPagamento === "Pago" && mesRef(t.data) === mes)
+      .filter((t) => t.tipo === "Despesa" && t.categoria === CATEGORIA_DESPESA_RESERVA && t.statusPagamento === "Pago" && mesRef(t.data) === mes)
       .reduce((s, t) => s + num(t.valor), 0);
   }
   const reservaDoMes = useMemo(() => computeReservaDoMes(monthAnchor), [transacoes, monthAnchor]);
@@ -3620,6 +3693,9 @@ export default function App() {
           <button className={"rail-btn " + (tab === "demandas" ? "active" : "")} onClick={() => setTab("demandas")}>
             <Film size={16} /> <span className="rail-label">Demandas</span>
           </button>
+          <button className={"rail-btn " + (tab === "reunioes" ? "active" : "")} onClick={() => setTab("reunioes")}>
+            <NotebookText size={16} /> <span className="rail-label">Reuniões</span>
+          </button>
           <button className={"rail-btn " + (tab === "kanban" ? "active" : "")} onClick={() => setTab("kanban")}>
             <LayoutGrid size={16} /> <span className="rail-label">Kanban semanal</span>
           </button>
@@ -3789,6 +3865,7 @@ export default function App() {
                     <button className="btn-ghost" onClick={() => { setTab("demandas"); setDemandForm(emptyDemand()); }}><Plus size={14} />Nova demanda</button>
                     <button className="btn-ghost" onClick={() => { setTab("clientes"); setClientForm(emptyClient()); }}><Plus size={14} />Novo cliente</button>
                     <button className="btn-ghost" onClick={() => { setTab("financeiro"); setTransacaoForm(emptyTransacao("Despesa")); }}><Plus size={14} />Nova despesa</button>
+                    <button className="btn-ghost" onClick={() => { setTab("reunioes"); setNotaReuniaoForm(emptyNotaReuniao()); }}><Plus size={14} />Nota de reunião</button>
                   </div>
                 </div>
                 <div className="home-right">
@@ -4077,7 +4154,7 @@ export default function App() {
                                           onClick={(e) => e.stopPropagation()}
                                           style={{ borderLeft: "3px solid " + corDoStatusComMapa(coresStatus, "video", v.status) }}
                                         >
-                                          {VIDEO_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                                          {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
                                         </select>
                                       </div>
                                     );
@@ -4091,6 +4168,43 @@ export default function App() {
                     })}
                   </tbody>
                 </table></div>
+              )}
+            </>
+          ) : tab === "reunioes" ? (
+            <>
+              <div className="toolbar">
+                <select value={notaReuniaoFiltroCliente} onChange={(e) => setNotaReuniaoFiltroCliente(e.target.value)}>
+                  <option value="">Todos os clientes</option>
+                  <option value="__sem_cliente__">Sem cliente vinculado</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+                <button className="btn-primary" onClick={() => setNotaReuniaoForm(emptyNotaReuniao())}>
+                  <Plus size={14} />Nova nota
+                </button>
+              </div>
+              {notasReuniaoFiltradas.length === 0 ? (
+                <div className="empty">Nenhuma nota registrada ainda.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {notasReuniaoFiltradas.map((nt) => (
+                    <div key={nt.id} className="metas-card" style={{ cursor: "pointer" }} onClick={() => setNotaReuniaoForm(nt)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                        <b>{nt.titulo || "Sem título"}</b>
+                        <span style={{ fontSize: 12, color: "var(--text-dim)", flexShrink: 0 }}>{fmtDate(nt.data)}</span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 4 }}>
+                        {nt.clienteId ? clientName(nt.clienteId) : (nt.clienteNomeLivre || "Sem cliente vinculado")}
+                      </div>
+                      {nt.conteudo && (
+                        <div style={{ fontSize: 13, marginTop: 10, whiteSpace: "pre-wrap", color: "var(--text)" }}>{nt.conteudo}</div>
+                      )}
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 4, marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+                        <button className="icon-btn" onClick={() => setNotaReuniaoForm(nt)}><Pencil size={13} /></button>
+                        <button className="icon-btn" onClick={() => setConfirmDelete({ type: "notaReuniao", id: nt.id, label: nt.titulo || "nota de reunião" })}><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </>
           ) : tab === "clientes" ? (
@@ -4611,6 +4725,13 @@ export default function App() {
                       <span>Reserva destinada até {mesLabel(monthAnchor)}</span>
                       <b>R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
+                    <button
+                      className="btn-ghost"
+                      style={{ marginTop: 10, width: "100%" }}
+                      onClick={() => setRetiradaReservaForm({ valor: "", data: todayISO(), descricao: "" })}
+                    >
+                      Retirar da poupança
+                    </button>
                   </div>
                 </div>
               </div>
@@ -5714,7 +5835,7 @@ export default function App() {
                       setDemandForm({ ...demandForm, itens });
                     }}
                   >
-                    {VIDEO_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
                   </select>
                   <button
                     className="icon-btn"
@@ -5727,7 +5848,7 @@ export default function App() {
               <button
                 className="btn-ghost"
                 style={{ width: "100%", marginTop: 4 }}
-                onClick={() => setDemandForm({ ...demandForm, itens: [...(demandForm.itens || []), emptyVideoItem()] })}
+                onClick={() => setDemandForm({ ...demandForm, itens: [...(demandForm.itens || []), { ...emptyVideoItem(), status: statusDemandas[0]?.nome || "" }] })}
               >
                 <Plus size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Adicionar vídeo
               </button>
@@ -5820,9 +5941,34 @@ export default function App() {
             <div className="field"><label>Tipo</label><div>{clientViewInfo.tipo || "—"}</div></div>
             {clientViewInfo.razaoSocial && <div className="field"><label>Razão social</label><div>{clientViewInfo.razaoSocial}</div></div>}
             {clientViewInfo.cnpj && <div className="field"><label>CNPJ</label><div>{clientViewInfo.cnpj}</div></div>}
-            {clientViewInfo.contatoNome && <div className="field"><label>Contato</label><div>{clientViewInfo.contatoNome}</div></div>}
+            {(clientViewInfo.contatoNome || clientViewInfo.telefone || (clientViewInfo.contatos || []).length > 0) && (
+              <div className="field">
+                <label>Contatos</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(clientViewInfo.contatoNome || clientViewInfo.telefone) && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span>{clientViewInfo.contatoNome || "—"}</span>
+                      {clientViewInfo.telefone && (
+                        <a className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} href={linkWhatsApp(clientViewInfo.telefone)} target="_blank" rel="noreferrer">
+                          <MessageCircle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />{clientViewInfo.telefone}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {(clientViewInfo.contatos || []).map((c, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span>{c.nome || "—"}</span>
+                      {c.telefone && (
+                        <a className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} href={linkWhatsApp(c.telefone)} target="_blank" rel="noreferrer">
+                          <MessageCircle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />{c.telefone}
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {clientViewInfo.email && <div className="field"><label>E-mail</label><div>{clientViewInfo.email}</div></div>}
-            {clientViewInfo.telefone && <div className="field"><label>Telefone</label><div>{clientViewInfo.telefone}</div></div>}
             {(clientViewInfo.endereco || clientViewInfo.bairro || clientViewInfo.municipio) && (
               <div className="field">
                 <label>Endereço</label>
@@ -5846,6 +5992,31 @@ export default function App() {
                 </div>
               </div>
             )}
+            <div className="field">
+              <label>Notas de reunião</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {notasReuniao.filter((nt) => nt.clienteId === clientViewInfo.id).map((nt) => (
+                  <div
+                    key={nt.id}
+                    style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, cursor: "pointer" }}
+                    onClick={() => setNotaReuniaoForm(nt)}
+                  >
+                    <span><NotebookText size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />{nt.titulo || "Sem título"}</span>
+                    <span style={{ fontSize: 12, color: "var(--text-dim)", flexShrink: 0 }}>{fmtDate(nt.data)}</span>
+                  </div>
+                ))}
+                {notasReuniao.filter((nt) => nt.clienteId === clientViewInfo.id).length === 0 && (
+                  <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Nenhuma nota registrada ainda.</span>
+                )}
+              </div>
+              <button
+                className="btn-ghost"
+                style={{ width: "100%", marginTop: 8 }}
+                onClick={() => setNotaReuniaoForm(emptyNotaReuniao(clientViewInfo.id))}
+              >
+                <Plus size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Nova nota de reunião
+              </button>
+            </div>
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => setClientViewInfo(null)}>Fechar</button>
               {clientViewInfo.driveLink && (
@@ -5889,6 +6060,37 @@ export default function App() {
                 <label>Telefone</label>
                 <input value={clientForm.telefone} onChange={(e) => setClientForm({ ...clientForm, telefone: e.target.value })} />
               </div>
+            </div>
+            <div className="field">
+              <label>Outros contatos (opcional — quando há mais de um responsável)</label>
+              {(clientForm.contatos || []).map((c, idx) => (
+                <div key={idx} className="video-item-row">
+                  <input
+                    placeholder="Nome"
+                    value={c.nome}
+                    onChange={(e) => {
+                      const contatos = clientForm.contatos.map((x, i) => (i === idx ? { ...x, nome: e.target.value } : x));
+                      setClientForm({ ...clientForm, contatos });
+                    }}
+                  />
+                  <input
+                    placeholder="Telefone"
+                    value={c.telefone}
+                    onChange={(e) => {
+                      const contatos = clientForm.contatos.map((x, i) => (i === idx ? { ...x, telefone: e.target.value } : x));
+                      setClientForm({ ...clientForm, contatos });
+                    }}
+                  />
+                  <button className="icon-btn" onClick={() => setClientForm({ ...clientForm, contatos: clientForm.contatos.filter((_, i) => i !== idx) })}><X size={13} /></button>
+                </div>
+              ))}
+              <button
+                className="btn-ghost"
+                style={{ width: "100%", marginTop: 4 }}
+                onClick={() => setClientForm({ ...clientForm, contatos: [...(clientForm.contatos || []), { nome: "", telefone: "" }] })}
+              >
+                <Plus size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Adicionar contato
+              </button>
             </div>
             <div className="field">
               <label>Link do Google Drive (arquivos do cliente)</label>
@@ -6243,6 +6445,106 @@ export default function App() {
         </div>
       )}
 
+      {retiradaReservaForm && (
+        <div className="overlay" onClick={() => setRetiradaReservaForm(null)}>
+          <div className="modal" style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
+            <h3>Retirar da poupança</h3>
+            <p style={{ fontSize: 13.5, color: "var(--text-dim)", marginTop: -4 }}>
+              Reserva disponível: R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <div className="field">
+              <label>Valor (R$)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                autoFocus
+                value={retiradaReservaForm.valor}
+                onChange={(e) => setRetiradaReservaForm({ ...retiradaReservaForm, valor: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Data</label>
+              <input
+                type="date"
+                value={retiradaReservaForm.data}
+                onChange={(e) => setRetiradaReservaForm({ ...retiradaReservaForm, data: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Descrição (opcional)</label>
+              <input
+                value={retiradaReservaForm.descricao}
+                onChange={(e) => setRetiradaReservaForm({ ...retiradaReservaForm, descricao: e.target.value })}
+                placeholder="Ex: Retirada pra equipamento novo"
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setRetiradaReservaForm(null)}>Cancelar</button>
+              <button className="btn-primary" style={{ marginLeft: 0 }} onClick={retirarDaReserva}>Retirar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notaReuniaoForm && (
+        <div className="overlay" onClick={() => setNotaReuniaoForm(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {notasReuniao.some((n2) => n2.id === notaReuniaoForm.id) ? "Editar nota" : "Nova nota de reunião"}
+              <X size={18} style={{ cursor: "pointer" }} onClick={() => setNotaReuniaoForm(null)} />
+            </h3>
+            <div className="field">
+              <label>Cliente</label>
+              <select
+                value={notaReuniaoForm.clienteId}
+                onChange={(e) => setNotaReuniaoForm({ ...notaReuniaoForm, clienteId: e.target.value })}
+              >
+                <option value="">Sem cliente vinculado</option>
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
+            {!notaReuniaoForm.clienteId && (
+              <div className="field">
+                <label>Nome do cliente (não cadastrado)</label>
+                <input
+                  value={notaReuniaoForm.clienteNomeLivre}
+                  onChange={(e) => setNotaReuniaoForm({ ...notaReuniaoForm, clienteNomeLivre: e.target.value })}
+                  placeholder="Ex: Contato via indicação, ainda sem cadastro"
+                />
+              </div>
+            )}
+            <div className="grid2">
+              <div className="field">
+                <label>Título</label>
+                <input
+                  value={notaReuniaoForm.titulo}
+                  onChange={(e) => setNotaReuniaoForm({ ...notaReuniaoForm, titulo: e.target.value })}
+                  placeholder="Ex: Reunião de brief"
+                />
+              </div>
+              <div className="field">
+                <label>Data</label>
+                <input type="date" value={notaReuniaoForm.data} onChange={(e) => setNotaReuniaoForm({ ...notaReuniaoForm, data: e.target.value })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Anotações / combinados</label>
+              <textarea
+                rows={8}
+                value={notaReuniaoForm.conteudo}
+                onChange={(e) => setNotaReuniaoForm({ ...notaReuniaoForm, conteudo: e.target.value })}
+                placeholder="O que foi combinado, referências enviadas, preferências do cliente…"
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setNotaReuniaoForm(null)}>Cancelar</button>
+              <button className="btn-primary" style={{ marginLeft: 0 }} onClick={() => saveNotaReuniao(notaReuniaoForm)}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmDelete && (
         <div className="overlay" onClick={() => setConfirmDelete(null)}>
           <div className="modal" style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
@@ -6268,6 +6570,7 @@ export default function App() {
                   else if (confirmDelete.type === "equipamento") removeEquipamento(confirmDelete.id);
                   else if (confirmDelete.type === "processo") removeProcessoDocumento(confirmDelete.doc);
                   else if (confirmDelete.type === "proposta") removeProposal(confirmDelete.id);
+                  else if (confirmDelete.type === "notaReuniao") removeNotaReuniao(confirmDelete.id);
                   else removeClient(confirmDelete.id);
                 }}
               >
