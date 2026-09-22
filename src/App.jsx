@@ -357,7 +357,7 @@ const TONE_CLASS = {
 function videoProgress(d) {
   const itens = d.itens || [];
   if (itens.length === 0) return null;
-  const done = itens.filter((v) => v.status === "Aprovado").length;
+  const done = itens.filter((v) => v.status === "Finalizada").length;
   return { done, total: itens.length };
 }
 
@@ -2124,9 +2124,16 @@ export default function App() {
   }
 
   function updateVideoField(demandId, itemId, field, value) {
-    const list = demandsRef.current.map((d) =>
-      d.id === demandId ? { ...d, itens: (d.itens || []).map((it) => (it.id === itemId ? { ...it, [field]: value } : it)) } : d
-    );
+    const list = demandsRef.current.map((d) => {
+      if (d.id !== demandId) return d;
+      const itens = (d.itens || []).map((it) => (it.id === itemId ? { ...it, [field]: value } : it));
+      let atualizado = { ...d, itens };
+      if (field === "status" && itens.length > 0 && itens.every((it) => it.status === "Finalizada") && atualizado.status !== "Finalizada") {
+        atualizado.status = "Finalizada";
+        atualizado.dataAprovacao = atualizado.dataAprovacao || todayISO();
+      }
+      return atualizado;
+    });
     persistDemands(list);
   }
 
@@ -2617,9 +2624,15 @@ export default function App() {
   }, [demands]);
 
   const demandasStatsMes = useMemo(() => {
-    const doMes = demands.filter((d) => mesRef(d.dataEnvioAprovacao) === monthAnchor);
-    const total = doMes.reduce((s, d) => s + demandaPeso(d), 0);
-    const finalizadas = doMes.filter((d) => d.status === "Finalizada").reduce((s, d) => s + demandaPeso(d), 0);
+    const doMes = new Set();
+    let finalizadas = 0;
+    demands.forEach((d) => {
+      const prazoNoMes = mesRef(d.dataEntrega) === monthAnchor;
+      const entregueNoMes = d.status === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
+      if (prazoNoMes || entregueNoMes) doMes.add(d);
+      if (entregueNoMes) finalizadas += demandaPeso(d);
+    });
+    const total = Array.from(doMes).reduce((s, d) => s + demandaPeso(d), 0);
     return { total, finalizadas };
   }, [demands, monthAnchor]);
 
@@ -4031,7 +4044,7 @@ export default function App() {
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", margin: "0 0 12px" }}>
                 <input type="checkbox" checked={mostrarVideosAprovados} onChange={(e) => setMostrarVideosAprovados(e.target.checked)} />
-                Mostrar vídeos aprovados
+                Mostrar vídeos finalizados
               </label>
 
               {filteredDemands.length === 0 ? (
@@ -4120,7 +4133,7 @@ export default function App() {
                               <td colSpan={8}>
                                 <div className="video-sublist">
                                   {d.itens.map((v, idx) => {
-                                    if (v.status === "Aprovado" && !mostrarVideosAprovados) return null;
+                                    if (v.status === "Finalizada" && !mostrarVideosAprovados) return null;
                                     const cor = corStatusVideo(v, coresStatus);
                                     return (
                                       <div
