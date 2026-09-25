@@ -43,7 +43,7 @@ Use um **projeto novo**, separado do Painel de Gestão da Fuzz.
    - **desligue "Allow new users to sign up"** — só quem compra ganha conta (o convite continua funcionando);
    - deixe "Confirm email" ligado.
 4. **Authentication → URL Configuration**:
-   - Site URL: `https://ferramentas.fuzzfilmes.com` (o endereço do passo 2);
+   - Site URL: `https://ferramentas.fuzzfilmes.com` (o endereço do passo 3 — pode voltar aqui e preencher depois);
    - Redirect URLs: adicione `https://ferramentas.fuzzfilmes.com/definir-senha.html`.
 5. **Authentication → Emails (SMTP)**: configure um SMTP próprio (ex: [Resend](https://resend.com), gratuito até 3.000 e-mails/mês). ⚠️ O e-mail padrão do Supabase só envia poucas mensagens por hora — serve pra teste, **não pra vender**.
 6. **Authentication → Emails → Templates** — troque pra português:
