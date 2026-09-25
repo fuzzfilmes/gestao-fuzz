@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora de Orçamento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/estilo.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  .app{display:grid;grid-template-columns:430px 1fr;min-height:100vh;}
+
+  /* ---------- editor ---------- */
+  .editor{background:var(--panel);border-right:1px solid var(--line);padding:28px 26px 60px;overflow-y:auto;max-height:100vh;position:sticky;top:0;}
+  .editor h1{font-size:20px;margin:0 0 6px;}
+  .editor p.sub{font-size:12px;margin:0 0 16px;}
+  .topo-acoes{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 24px;}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .chip{
+    padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel-2);color:var(--text);
+    font-family:var(--sans);font-size:11.5px;cursor:pointer;transition:.15s;
+  }
+  .chip:hover{border-color:var(--accent);color:var(--accent);}
+  .chip .p{color:var(--text-soft);font-family:var(--mono);font-size:10.5px;margin-left:4px;}
+
+  .item{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:var(--panel-2);}
+  .item .l1{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .item .l1 .nome{flex:1;font-size:13px;font-weight:600;}
+  .item .l1 .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--text-soft);border:1px solid var(--line);border-radius:4px;padding:2px 5px;}
+  .item .l2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .item label{margin:0 0 3px;font-size:10.5px;}
+  .item input{padding:7px 9px;font-size:12.5px;background:var(--panel);}
+  .item .rm{background:none;border:1px solid var(--line);color:var(--text-soft);cursor:pointer;width:26px;height:26px;border-radius:5px;flex:0 0 auto;}
+  .item .rm:hover{border-color:var(--accent);color:var(--accent);}
+  .vazio{font-size:12px;color:var(--text-soft);border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center;line-height:1.6;}
+
+  /* ---------- resultado ---------- */
+  .result-wrap{padding:48px;display:flex;justify-content:center;align-items:flex-start;}
+  .result{width:470px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:30px 30px 26px;position:relative;}
+  .result h1{font-size:22px;margin:2px 0 2px;}
+  .result .tipo-atual{font-family:var(--mono);font-size:11.5px;color:var(--text-soft);margin-bottom:18px;}
+
+  .doc-head{display:flex;align-items:center;gap:14px;margin:0 0 18px;}
+  .doc-head img{max-height:44px;max-width:120px;object-fit:contain;}
+  .doc-head .empresa{font-size:15px;font-weight:700;line-height:1.2;}
+  .doc-head .contato{font-family:var(--mono);font-size:10.5px;color:var(--text-soft);margin-top:3px;}
+  .doc-meta{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:12px;padding:12px 0 14px;border-top:1px solid var(--line);margin-bottom:6px;}
+  .doc-meta .k{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-soft);}
+  .doc-meta .cliente{font-weight:600;font-size:14px;}
+  .doc-meta .direita{text-align:right;}
+  .doc-desc{font-size:12px;color:var(--text-soft);line-height:1.6;margin:-2px 0 12px;white-space:pre-line;}
+
+  .linha{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:10px 0;border-top:1px solid var(--line);}
+  .linha .v{white-space:nowrap;font-weight:600;font-family:var(--mono);}
+  .linha.acrescimo span:first-child, .linha.acrescimo .v{color:var(--text-soft);}
+  .linha-vazia{font-size:12px;color:var(--text-soft);padding:14px 0;border-top:1px solid var(--line);text-align:center;}
+  .subtotal{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:600;padding:14px 0;margin-top:4px;border-top:1px solid var(--line);color:var(--text-soft);}
+  .subtotal .v{font-family:var(--mono);color:var(--text);}
+  .total-final{text-align:center;padding:22px 16px;margin-top:6px;background:var(--accent-dim);border:1px solid rgba(255,59,48,.3);border-radius:10px;}
+  .total-final .label{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-soft);}
+  .total-final .value{font-family:var(--mono);font-weight:700;font-size:36px;margin-top:8px;text-shadow:0 0 24px var(--accent-dim);}
+  .info-linha{text-align:center;font-size:11.5px;font-family:var(--mono);color:var(--text-soft);margin-top:10px;}
+  .validade{font-family:var(--mono);font-size:10.5px;color:var(--text-soft);text-align:center;margin-top:14px;}
+  .inclui-titulo{display:none;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-soft);margin:4px 0 8px;}
+
+  .interno .caixa{margin-top:18px;padding:14px 16px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;font-size:11.5px;color:var(--text-soft);line-height:1.7;}
+  .interno b{color:var(--text);}
+  .interno .liquido{color:var(--good);font-weight:700;}
+  .interno-tag{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;}
+
+  .export-row{display:flex;gap:8px;margin-top:18px;}
+  .export-btn{flex:1;padding:11px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--line);background:transparent;color:var(--text-soft);border-radius:7px;cursor:pointer;transition:.15s;}
+  .export-btn:hover{border-color:var(--accent);color:var(--text);}
+
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:10px 16px;border-radius:8px;font-size:12.5px;opacity:0;transition:.2s;pointer-events:none;z-index:300;}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  @media print{
+    body{background:#fff;}
+    .editor, .export-row, .interno, .rec, .toast{display:none !important;}
+    .app{display:block !important;}
+    .result-wrap{padding:0;}
+    .result{width:auto;}
+    .result.pacote .linha .v, .result.pacote .subtotal, .result.pacote .linha.acrescimo{display:none !important;}
+    .result.pacote .inclui-titulo{display:block !important;}
+    *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+  }
+  @media (max-width:920px){
+    .app{grid-template-columns:1fr;}
+    .editor{max-height:none;position:static;border-right:none;border-bottom:1px solid var(--line);padding:24px 16px 32px;}
+    .result-wrap{padding:24px 16px;}
+    .result{width:100%;padding:24px 18px 20px;}
+    .total-final .value{font-size:30px;}
+  }
+</style>
+</head>
+<body>
+<div class="carregando" id="carregando">CARREGANDO…</div>
+
+<div class="app" id="app" style="display:none;">
+  <div class="editor">
+    <div class="eyebrow" id="ed-eyebrow">Orçamento</div>
+    <h1>Calculadora</h1>
+    <p class="sub">Monte o orçamento — o monitor ao lado atualiza em tempo real.</p>
+    <div class="topo-acoes">
+      <a class="mini-btn" href="configurar.html" style="text-decoration:none;">⚙ Configurações</a>
+      <a class="mini-btn" href="../index.html" style="text-decoration:none;">▦ Minhas ferramentas</a>
+      <button type="button" class="mini-btn" id="btn-limpar">↺ Novo orçamento</button>
+    </div>
+
+    <div class="group">
+      <h2>Cliente</h2>
+      <label>Nome do cliente</label>
+      <input type="text" id="in-cliente" placeholder="Ex: Padaria Central">
+      <label>Descrição do projeto (opcional)</label>
+      <input type="text" id="in-descricao" placeholder="Ex: 4 vídeos para Reels — campanha de verão">
+    </div>
+
+    <div class="group">
+      <h2>Trabalho</h2>
+      <label>Tipo de trabalho</label>
+      <input type="text" id="in-tipo" list="sugestoes-tipo" placeholder="Ex: Vídeo institucional">
+      <datalist id="sugestoes-tipo"></datalist>
+      <label>Quantidade de entregas (vídeos, episódios, ensaios…)</label>
+      <input type="number" id="in-quantidade" value="1" min="1" step="1">
+      <div class="toggle-row">
+        <label>Desconto progressivo por quantidade</label>
+        <div class="switch"><input type="checkbox" id="chk-desconto"><div class="track"></div><div class="thumb"></div></div>
+      </div>
+      <div id="bloco-desconto">
+        <label>Desconto por entrega adicional (%)</label>
+        <input type="number" id="in-desconto" min="0" max="90" step="1">
+      </div>
+      <label style="margin-top:14px;">Valor final do pacote (opcional)</label>
+      <input type="number" id="in-pacote" placeholder="Deixe em branco pra usar o valor calculado" min="0" step="1">
+      <p class="dica">Preencha se quiser fechar um preço redondo. O cliente vê só o que está incluído, sem os valores de cada item.</p>
+    </div>
+
+    <div class="group">
+      <h2>Serviços</h2>
+      <div class="chips" id="chips"></div>
+      <div id="lista-itens"></div>
+    </div>
+
+    <div class="group">
+      <h2>Freelancers contratados</h2>
+      <div id="lista-freelas"></div>
+      <button type="button" class="add-btn" id="btn-freela">+ adicionar freelancer</button>
+      <p class="dica">Valor por entrega — é multiplicado pela quantidade de entregas.</p>
+    </div>
+
+    <div class="group">
+      <h2>Imposto</h2>
+      <div class="row2">
+        <div>
+          <label>Alíquota (%)</label>
+          <input type="number" id="in-imposto" min="0" step="0.5">
+        </div>
+        <div>
+          <label>Aplicação</label>
+          <select id="in-imposto-modo">
+            <option value="informativo">Só pra mim</option>
+            <option value="somar">Somar ao cliente</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <button type="button" class="btn sec" id="btn-copiar">Copiar resumo</button>
+    <div class="rodape" id="rodape" style="text-align:left;"></div>
+  </div>
+
+  <div class="result-wrap">
+    <div class="result visor" id="result-card"><span class="br-tr"></span><span class="br-bl"></span>
+      <div class="rec"><span class="dot"></span><span class="t">Orçamento ao vivo</span></div>
+      <div class="doc-head" id="pv-head" style="display:none;"></div>
+      <h1>Orçamento</h1>
+      <div class="tipo-atual" id="pv-tipo"></div>
+      <div class="doc-meta">
+        <div><div class="k">Para</div><div class="cliente" id="pv-cliente">—</div></div>
+        <div class="direita"><div class="k">Data</div><div id="pv-data"></div></div>
+      </div>
+      <div class="doc-desc" id="pv-descricao"></div>
+
+      <div class="inclui-titulo">O pacote inclui</div>
+      <div id="pv-linhas"></div>
+
+      <div class="subtotal"><span>Subtotal</span><span class="v" id="pv-subtotal">R$ 0,00</span></div>
+      <div class="total-final">
+        <div class="label">Investimento total</div>
+        <div class="value" id="pv-total">R$ 0,00</div>
+      </div>
+      <div class="info-linha" id="pv-por-entrega"></div>
+      <div class="validade" id="pv-validade"></div>
+
+      <div class="interno">
+        <div class="caixa">
+          <span class="interno-tag">● Só você vê — não sai no PDF/PNG</span>
+          <div id="pv-comparativo" style="font-family:var(--mono);margin-bottom:6px;"></div>
+          <div id="pv-imposto"></div>
+          <div id="pv-horas" style="margin-top:6px;"></div>
+        </div>
+      </div>
+
+      <div class="export-row">
+        <button type="button" class="export-btn" id="btn-pdf">Exportar PDF</button>
+        <button type="button" class="export-btn" id="btn-png">Exportar PNG</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/config.js"></script>
+<script>window.RAIZ = '../';</script>
+<script src="../assets/app.js"></script>
+<script src="catalogo.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const K = window.Catalogo;
+let cfg;
+let itens = [];      // { servicoId, nome, unidade, cobranca, qtd, preco }
+let freelas = [];    // { funcao, valor }
+const RASCUNHO = 'calc_rascunho_v1';
+
+const fmt = (n) => (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const qtdTxt = (n) => (Number(n) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+
+function toast(t){
+  const el = $('toast'); el.textContent = t; el.classList.add('on');
+  clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('on'), 2200);
+}
+
+// ---------------- chips (serviços disponíveis) ----------------
+function renderChips(){
+  const host = $('chips'); host.innerHTML = '';
+  const visiveis = K.servicosVisiveis(cfg);
+  if(!visiveis.length){
+    host.innerHTML = '<div class="vazio" style="width:100%;">Nenhum serviço ligado. Vá em ⚙ Configurações → Serviços.</div>';
+    return;
+  }
+  visiveis.forEach((s) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip';
+    const u = K.UNIDADES[s.unidade] || K.UNIDADES.unidade;
+    b.innerHTML = '+ <span class="n"></span><span class="p"></span>';
+    b.querySelector('.n').textContent = s.nome;
+    b.querySelector('.p').textContent = 'R$' + qtdTxt(K.precoDe(s, cfg)) + '/' + u.s;
+    b.onclick = () => adicionarItem(s);
+    host.appendChild(b);
+  });
+}
+
+function adicionarItem(s){
+  itens.push({ servicoId: s.id, nome: s.nome, unidade: s.unidade, cobranca: s.cobranca, qtd: 1, preco: K.precoDe(s, cfg) });
+  renderItens(); calcular();
+  const ultimo = $('lista-itens').lastElementChild;
+  if(ultimo){ const q = ultimo.querySelector('.i-qtd'); if(q){ q.focus(); q.select(); } }
+}
+
+function renderItens(){
+  const host = $('lista-itens'); host.innerHTML = '';
+  if(!itens.length){
+    host.innerHTML = '<div class="vazio">Toque nos serviços acima para montar o orçamento.</div>';
+    return;
+  }
+  itens.forEach((it, idx) => {
+    const u = K.UNIDADES[it.unidade] || K.UNIDADES.unidade;
+    const row = document.createElement('div');
+    row.className = 'item';
+    row.innerHTML =
+      '<div class="l1"><span class="nome"></span>' +
+      (it.cobranca === 'unico' ? '<span class="tag" title="Entra uma vez só, não multiplica pelas entregas">1× NO PACOTE</span>' : '') +
+      '<button type="button" class="rm" title="remover">×</button></div>' +
+      '<div class="l2"><div><label></label><input type="number" class="i-qtd" min="0" step="0.5"></div>' +
+      '<div><label></label><input type="number" class="i-preco" min="0" step="1"></div></div>';
+    row.querySelector('.nome').textContent = it.nome;
+    const [lq, lp] = row.querySelectorAll('label');
+    lq.textContent = 'Quantidade (' + u.p + ')';
+    lp.textContent = 'Valor por ' + u.s + ' (R$)';
+    const q = row.querySelector('.i-qtd'), p = row.querySelector('.i-preco');
+    q.value = it.qtd; p.value = it.preco;
+    q.oninput = () => { it.qtd = num(q.value); calcular(); };
+    p.oninput = () => { it.preco = num(p.value); calcular(); };
+    row.querySelector('.rm').onclick = () => { itens.splice(idx, 1); renderItens(); calcular(); };
+    host.appendChild(row);
+  });
+}
+
+function renderFreelas(){
+  const host = $('lista-freelas'); host.innerHTML = '';
+  freelas.forEach((f, idx) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+    row.innerHTML =
+      '<div class="l1"><input type="text" class="f-funcao" placeholder="Função (ex: assistente de câmera)" style="flex:1;"><button type="button" class="rm" title="remover">×</button></div>' +
+      '<div><label>Valor (R$)</label><input type="number" class="f-valor" min="0" step="1"></div>';
+    const fn = row.querySelector('.f-funcao'), fv = row.querySelector('.f-valor');
+    fn.value = f.funcao; fv.value = f.valor;
+    fn.oninput = () => { f.funcao = fn.value; calcular(); };
+    fv.oninput = () => { f.valor = num(fv.value); calcular(); };
+    row.querySelector('.rm').onclick = () => { freelas.splice(idx, 1); renderFreelas(); calcular(); };
+    host.appendChild(row);
+  });
+}
+$('btn-freela').onclick = () => { freelas.push({ funcao: '', valor: 0 }); renderFreelas(); calcular(); };
+
+// ---------------- cálculo ----------------
+function calcular(){
+  const tipo = $('in-tipo').value.trim();
+  $('pv-tipo').textContent = tipo || ' ';
+  const cliente = $('in-cliente').value.trim();
+  $('pv-cliente').textContent = cliente || '—';
+  $('pv-descricao').textContent = $('in-descricao').value.trim();
+  const hoje = new Date();
+  $('pv-data').textContent = hoje.toLocaleDateString('pt-BR');
+  const dias = Number(cfg.validade) || 0;
+  $('pv-validade').textContent = dias > 0
+    ? 'Orçamento válido até ' + new Date(hoje.getTime() + dias * 86400000).toLocaleDateString('pt-BR') + ' (' + dias + ' dias)'
+    : '';
+
+  const porEntrega = itens.filter((i) => i.cobranca !== 'unico');
+  const unicos = itens.filter((i) => i.cobranca === 'unico');
+  const valorItem = (i) => (Number(i.qtd) || 0) * (Number(i.preco) || 0);
+
+  const totalFreelas = freelas.reduce((s, f) => s + (Number(f.valor) || 0), 0);
+  const subtotalUnidade = porEntrega.reduce((s, i) => s + valorItem(i), 0) + totalFreelas;
+  const custosUnicos = unicos.reduce((s, i) => s + valorItem(i), 0);
+
+  const quantidade = Math.max(1, parseInt($('in-quantidade').value) || 1);
+  const descontoOn = $('chk-desconto').checked;
+  const descontoPct = num($('in-desconto').value);
+  $('bloco-desconto').style.display = descontoOn ? '' : 'none';
+
+  let subtotal = subtotalUnidade * quantidade;
+  if(quantidade > 1 && descontoOn){
+    const r = 1 - descontoPct / 100;
+    const mult = Math.abs(1 - r) < 1e-4 ? quantidade : (1 - Math.pow(r, quantidade)) / (1 - r);
+    subtotal = subtotalUnidade * mult;
+  }
+  const totalCliente = subtotal + custosUnicos;
+
+  const impostoPct = num($('in-imposto').value);
+  const impostoModo = $('in-imposto-modo').value;
+  const valorFinal = impostoModo === 'somar' ? totalCliente * (1 + impostoPct / 100) : totalCliente;
+
+  // linhas do documento
+  const host = $('pv-linhas'); host.innerHTML = '';
+  const addLinha = (label, valor, classe) => {
+    const d = document.createElement('div');
+    d.className = 'linha' + (classe ? ' ' + classe : '');
+    d.innerHTML = '<span></span><span class="v"></span>';
+    d.firstChild.textContent = label;
+    d.lastChild.textContent = typeof valor === 'string' ? valor : 'R$ ' + fmt(valor);
+    host.appendChild(d);
+  };
+  const rotulo = (i) => i.nome + ' (' + qtdTxt(i.qtd) + ' ' + ((K.UNIDADES[i.unidade] || {}).curto === 'h' ? 'h' : K.unidadeTexto(i.unidade, i.qtd)) + ')';
+  porEntrega.forEach((i) => { if(i.qtd) addLinha(rotulo(i), valorItem(i)); });
+  freelas.forEach((f) => { if(f.valor) addLinha('Freelancer' + (f.funcao ? ' — ' + f.funcao : ''), Number(f.valor)); });
+  if(quantidade > 1 && subtotalUnidade > 0){
+    addLinha('× ' + quantidade + ' entregas' + (descontoOn && descontoPct ? ' (desconto progressivo)' : ''),
+      'R$ ' + fmt(subtotalUnidade) + ' → R$ ' + fmt(subtotal), 'acrescimo');
+  }
+  unicos.forEach((i) => { if(i.qtd) addLinha(rotulo(i), valorItem(i)); });
+  if(!host.children.length){
+    host.innerHTML = '<div class="linha-vazia">Adicione serviços para ver o orçamento.</div>';
+  }
+
+  // valor final do pacote (override)
+  const overrideRaw = $('in-pacote').value;
+  const temOverride = overrideRaw !== '' && !isNaN(parseFloat(overrideRaw));
+  const valorPacote = temOverride ? parseFloat(overrideRaw) : null;
+  const valorExibido = temOverride ? valorPacote : valorFinal;
+  $('result-card').classList.toggle('pacote', temOverride);
+
+  $('pv-subtotal').textContent = 'R$ ' + fmt(totalCliente);
+  $('pv-total').textContent = 'R$ ' + fmt(valorExibido);
+  $('pv-por-entrega').textContent = quantidade > 1 ? quantidade + ' ENTREGAS — R$ ' + fmt(valorExibido / quantidade) + ' / CADA' : '';
+
+  // bloco interno
+  const comp = $('pv-comparativo');
+  if(temOverride){
+    const diff = valorPacote - valorFinal;
+    comp.style.display = '';
+    comp.textContent = 'Calculado: R$ ' + fmt(valorFinal) + ' · pacote ' + (diff >= 0 ? '+' : '−') + 'R$ ' + fmt(Math.abs(diff));
+  } else {
+    comp.style.display = 'none';
+  }
+  const modoEfetivo = temOverride ? 'informativo' : impostoModo;
+  const base = temOverride ? valorPacote : totalCliente;
+  const imp = base * impostoPct / 100;
+  const liquido = modoEfetivo === 'somar' ? base : base - imp;
+  if(impostoPct <= 0){
+    $('pv-imposto').innerHTML = 'Sem imposto configurado. Valor que fica pra você: <span class="liquido">R$ ' + fmt(base) + '</span>';
+  } else if(modoEfetivo === 'somar'){
+    $('pv-imposto').innerHTML = 'Imposto de ' + impostoPct + '% (R$ ' + fmt(imp) + ') <b>somado</b> ao valor do cliente.<br>Fica pra você: <span class="liquido">R$ ' + fmt(liquido) + '</span>';
+  } else {
+    $('pv-imposto').innerHTML = 'Imposto de ' + impostoPct + '% sobre a nota: <b>R$ ' + fmt(imp) + '</b>' +
+      (temOverride && impostoModo === 'somar' ? ' — não somado, porque o pacote já é o preço final.' : ' (sai do seu faturamento).') +
+      '<br>Líquido estimado: <span class="liquido">R$ ' + fmt(liquido) + '</span>';
+  }
+  // horas totais e hora efetiva — mostra se o pacote está pagando sua hora
+  // só as horas de trabalho (serviços por entrega); descontamos custos únicos e freelancers
+  const horasTot = porEntrega.filter((i) => i.unidade === 'hora').reduce((s, i) => s + (Number(i.qtd) || 0), 0) * quantidade;
+  if(horasTot > 0){
+    const efetiva = (liquido - custosUnicos - totalFreelas * quantidade) / horasTot;
+    const abaixo = efetiva < Number(cfg.valorHora) - 0.005;
+    $('pv-horas').innerHTML = qtdTxt(horasTot) + ' h de trabalho · sua hora efetiva: <b style="color:' + (abaixo ? 'var(--warn)' : 'var(--good)') + '">R$ ' + fmt(efetiva) + '</b>' +
+      (abaixo ? ' <span style="color:var(--warn)">(abaixo dos seus R$ ' + fmt(cfg.valorHora) + ')</span>' : '');
+  } else {
+    $('pv-horas').textContent = '';
+  }
+
+  salvarRascunho();
+}
+
+// ---------------- rascunho (só neste navegador) ----------------
+function salvarRascunho(){
+  try{
+    localStorage.setItem(RASCUNHO, JSON.stringify({
+      cliente: $('in-cliente').value, descricao: $('in-descricao').value, tipo: $('in-tipo').value,
+      quantidade: $('in-quantidade').value, descontoOn: $('chk-desconto').checked, desconto: $('in-desconto').value,
+      pacote: $('in-pacote').value, imposto: $('in-imposto').value, impostoModo: $('in-imposto-modo').value,
+      itens, freelas
+    }));
+  }catch(e){}
+}
+function lerRascunho(){ try{ return JSON.parse(localStorage.getItem(RASCUNHO) || 'null'); }catch(e){ return null; } }
+
+function aplicarPadroes(){
+  $('in-cliente').value = ''; $('in-descricao').value = ''; $('in-tipo').value = '';
+  $('in-quantidade').value = 1;
+  $('chk-desconto').checked = !!cfg.desconto.ativo;
+  $('in-desconto').value = cfg.desconto.pct;
+  $('in-pacote').value = '';
+  $('in-imposto').value = cfg.imposto.pct;
+  $('in-imposto-modo').value = cfg.imposto.modo;
+  itens = []; freelas = [];
+}
+
+$('btn-limpar').onclick = () => {
+  if(!confirm('Começar um orçamento novo? O atual será apagado.')) return;
+  aplicarPadroes(); renderItens(); renderFreelas(); calcular();
+};
+
+['in-cliente','in-descricao','in-tipo','in-quantidade','in-desconto','in-pacote','in-imposto'].forEach((id) => $(id).addEventListener('input', calcular));
+['chk-desconto','in-imposto-modo'].forEach((id) => $(id).addEventListener('change', calcular));
+
+// ---------------- saída ----------------
+function nomeArquivo(){
+  const slug = $('in-cliente').value.trim().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return 'orcamento' + (slug ? '-' + slug : '') + '-' + new Date().toISOString().slice(0, 10);
+}
+
+$('btn-pdf').onclick = () => {
+  const t = document.title;
+  document.title = nomeArquivo();
+  window.print();
+  setTimeout(() => { document.title = t; }, 500);
+};
+
+$('btn-png').onclick = () => {
+  if(!window.html2canvas){ toast('Não consegui carregar o gerador de PNG. Use o Exportar PDF.'); return; }
+  const card = $('result-card');
+  html2canvas(card, {
+    backgroundColor: '#131519', scale: 2,
+    ignoreElements: (el) => {
+      if(!el.classList) return false;
+      if(el.classList.contains('export-row') || el.classList.contains('interno') || el.classList.contains('rec')) return true;
+      if(card.classList.contains('pacote') && el.matches && el.matches('.linha .v, .subtotal, .linha.acrescimo')) return true;
+      return false;
+    },
+    onclone: (doc) => {
+      const c = doc.getElementById('result-card');
+      if(c && c.classList.contains('pacote')){ const t = c.querySelector('.inclui-titulo'); if(t) t.style.display = 'block'; }
+    }
+  }).then((canvas) => {
+    const a = document.createElement('a');
+    a.download = nomeArquivo() + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  }).catch(() => toast('Não consegui gerar o PNG agora. Use o Exportar PDF.'));
+};
+
+$('btn-copiar').onclick = () => {
+  const cliente = $('in-cliente').value.trim();
+  const tipo = $('in-tipo').value.trim();
+  const linhas = [...document.querySelectorAll('#pv-linhas .linha')].map((l) => '- ' + l.children[0].textContent + ': ' + l.children[1].textContent).join('\n');
+  const texto = 'Orçamento' + (tipo ? ' — ' + tipo : '') + (cliente ? ' — ' + cliente : '') + '\n' + linhas + '\n\nValor total: ' + $('pv-total').textContent;
+  navigator.clipboard.writeText(texto).then(() => toast('Resumo copiado!')).catch(() => prompt('Copie o resumo:', texto));
+};
+
+// ---------------- início ----------------
+function renderCabecalho(){
+  const n = cfg.negocio;
+  $('ed-eyebrow').textContent = n.nome ? n.nome + ' · Orçamento' : 'Orçamento';
+  const head = $('pv-head');
+  if(!n.nome && !n.logo && !n.contato){ head.style.display = 'none'; return; }
+  head.style.display = 'flex';
+  head.innerHTML = (n.logo ? '<img alt="">' : '') + '<div><div class="empresa"></div><div class="contato"></div></div>';
+  if(n.logo) head.querySelector('img').src = n.logo;
+  head.querySelector('.empresa').textContent = n.nome;
+  head.querySelector('.contato').textContent = n.contato;
+}
+
+(async () => {
+  App.faixaDemo();
+  const s = await App.exigirAcesso('calculadora');
+  let salvo = null;
+  try{ salvo = await App.lerConfig('calculadora'); }
+  catch(e){ App.telaBloqueio('Não conseguimos carregar suas configurações', App.mensagemErro(e), null); return; }
+  if(!salvo){ location.replace('configurar.html'); return; }
+  cfg = K.completar(salvo);
+
+  const dl = $('sugestoes-tipo');
+  cfg.areas.forEach((a) => (K.SUGESTOES_TRABALHO[a] || []).forEach((t) => { const o = document.createElement('option'); o.value = t; dl.appendChild(o); }));
+  $('rodape').textContent = (App.config.MARCA || '') + ' · Calculadora v2.0' + (s && s.email ? ' · ' + s.email : '') + (App.config.SUPORTE ? '\nDúvidas? ' + App.config.SUPORTE : '');
+  $('rodape').style.whiteSpace = 'pre-line';
+
+  renderCabecalho();
+  renderChips();
+  aplicarPadroes();
+  const r = lerRascunho();
+  if(r){
+    $('in-cliente').value = r.cliente || ''; $('in-descricao').value = r.descricao || ''; $('in-tipo').value = r.tipo || '';
+    $('in-quantidade').value = r.quantidade || 1; $('chk-desconto').checked = !!r.descontoOn; $('in-desconto').value = r.desconto ?? cfg.desconto.pct;
+    $('in-pacote').value = r.pacote || ''; $('in-imposto').value = r.imposto ?? cfg.imposto.pct; $('in-imposto-modo').value = r.impostoModo || cfg.imposto.modo;
+    itens = Array.isArray(r.itens) ? r.itens : []; freelas = Array.isArray(r.freelas) ? r.freelas : [];
+  }
+  renderItens(); renderFreelas(); calcular();
+  $('carregando').style.display = 'none';
+  $('app').style.display = 'grid';
+})();
+</script>
+</body>
+</html>

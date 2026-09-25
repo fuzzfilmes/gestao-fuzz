@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minhas Ferramentas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/estilo.css">
+<style>
+  .hub{max-width:760px;margin:0 auto;padding:48px 16px 60px;}
+  .hub-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:28px;}
+  .hub-top .quem{font-family:var(--mono);font-size:11px;color:var(--text-soft);}
+  .grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;}
+  .ferr{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 18px;
+    display:flex;flex-direction:column;gap:8px;text-decoration:none;color:var(--text);transition:.15s;position:relative;min-height:170px;
+  }
+  a.ferr:hover{border-color:var(--accent);}
+  .ferr .nome{font-weight:700;font-size:16px;}
+  .ferr .desc{font-size:12px;color:var(--text-soft);line-height:1.6;flex:1;}
+  .ferr .status{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;}
+  .ferr.liberada .status{color:var(--good);}
+  .ferr.bloqueada{opacity:.7;}
+  .ferr.bloqueada .status{color:var(--text-soft);}
+  .ferr.breve{opacity:.45;}
+  #tela-login, #tela-hub{display:none;}
+</style>
+</head>
+<body>
+
+<div class="carregando" id="tela-carregando">CARREGANDO…</div>
+
+<!-- ============ LOGIN ============ -->
+<div class="centro" id="tela-login">
+  <div class="cartao visor"><span class="br-tr"></span><span class="br-bl"></span>
+    <div class="rec"><span class="dot"></span><span class="t" data-marca>Ferramentas</span></div>
+    <h1 id="login-titulo">Entrar</h1>
+    <p class="sub" id="login-sub">Use o mesmo e-mail da sua compra.</p>
+
+    <form id="form-login" autocomplete="on">
+      <label for="login-email">E-mail</label>
+      <input type="email" id="login-email" autocomplete="email" required placeholder="voce@email.com">
+      <div id="bloco-senha">
+        <label for="login-senha">Senha</label>
+        <input type="password" id="login-senha" autocomplete="current-password" placeholder="Sua senha">
+      </div>
+      <button class="btn" type="submit" id="btn-entrar">Entrar</button>
+    </form>
+
+    <div class="msg" id="login-msg"></div>
+
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:18px;flex-wrap:wrap;">
+      <button class="link-btn" id="btn-modo-link" type="button">Primeiro acesso ou esqueci a senha</button>
+    </div>
+
+    <div class="rodape" id="rodape-login"></div>
+  </div>
+</div>
+
+<!-- ============ HUB (minhas ferramentas) ============ -->
+<div id="tela-hub">
+  <div class="hub">
+    <div class="hub-top">
+      <div>
+        <div class="eyebrow" data-marca>Ferramentas</div>
+        <h1 style="margin:0;">Minhas ferramentas</h1>
+      </div>
+      <div style="text-align:right;">
+        <div class="quem" id="hub-email"></div>
+        <button class="link-btn" id="btn-sair" type="button" style="margin-top:6px;">Sair</button>
+      </div>
+    </div>
+    <div class="grade" id="hub-grade"></div>
+    <div class="rodape" id="rodape-hub"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="assets/config.js"></script>
+<script>window.RAIZ = './';</script>
+<script src="assets/app.js"></script>
+<script>
+const PRODUTOS = [
+  { id: 'calculadora', nome: 'Calculadora de Orçamento', url: 'calculadora/',
+    desc: 'Monte orçamentos pelo valor da sua hora e exporte em PDF ou PNG com a sua marca.' },
+  { id: 'propostas', nome: 'Gerador de Propostas', url: null,
+    desc: 'Propostas comerciais em PDF, prontas pra enviar ao cliente.' }
+];
+
+const C = App.config;
+const $ = (id) => document.getElementById(id);
+let modoLink = false;
+
+document.querySelectorAll('[data-marca]').forEach((el) => el.textContent = C.MARCA || 'Ferramentas');
+const suporte = C.SUPORTE ? 'Dúvidas? ' + C.SUPORTE : '';
+$('rodape-login').textContent = suporte;
+$('rodape-hub').textContent = suporte;
+
+function mostrar(tela){
+  ['tela-carregando','tela-login','tela-hub'].forEach((t) => $(t).style.display = 'none');
+  $(tela).style.display = tela === 'tela-login' ? 'flex' : 'block';
+}
+
+function msg(texto, tipo){
+  const m = $('login-msg');
+  m.className = 'msg' + (texto ? ' ' + tipo : '');
+  m.textContent = texto || '';
+}
+
+function alternarModoLink(ativo){
+  modoLink = ativo;
+  $('bloco-senha').style.display = ativo ? 'none' : '';
+  $('login-titulo').textContent = ativo ? 'Criar ou redefinir senha' : 'Entrar';
+  $('login-sub').textContent = ativo
+    ? 'Digite o e-mail da sua compra. Vamos te enviar um link para criar sua senha.'
+    : 'Use o mesmo e-mail da sua compra.';
+  $('btn-entrar').textContent = ativo ? 'Enviar link' : 'Entrar';
+  $('btn-modo-link').textContent = ativo ? '← Voltar para o login' : 'Primeiro acesso ou esqueci a senha';
+  msg('');
+}
+
+$('btn-modo-link').onclick = () => alternarModoLink(!modoLink);
+
+$('form-login').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const email = $('login-email').value;
+  const btn = $('btn-entrar');
+  btn.disabled = true; msg('');
+  try{
+    if(modoLink){
+      const r = await App.pedirLinkDeSenha(email);
+      msg(r.mensagem, 'ok');
+    } else {
+      await App.entrar(email, $('login-senha').value);
+      const volta = new URLSearchParams(location.search).get('volta');
+      // só aceita voltar pra páginas deste mesmo site
+      if(volta && volta.startsWith('/') && !volta.startsWith('//')) { location.href = volta; return; }
+      await abrirHub();
+    }
+  }catch(e){
+    msg(App.mensagemErro(e), 'erro');
+  }finally{
+    btn.disabled = false;
+  }
+};
+
+$('btn-sair').onclick = async () => { await App.sair(); alternarModoLink(false); mostrar('tela-login'); };
+
+async function abrirHub(){
+  const s = await App.sessao();
+  if(!s){ mostrar('tela-login'); return; }
+  $('hub-email').textContent = s.email;
+  let liberados = [];
+  try{ liberados = await App.produtosLiberados(); }catch(e){ console.error(e); }
+  const grade = $('hub-grade');
+  grade.innerHTML = '';
+  PRODUTOS.forEach((p) => {
+    const tem = liberados.includes(p.id);
+    const compra = (C.LINKS_COMPRA || {})[p.id];
+    let el;
+    if(!p.url){
+      el = document.createElement('div'); el.className = 'ferr breve';
+      el.innerHTML = '<div class="status">Em breve</div>';
+    } else if(tem){
+      el = document.createElement('a'); el.className = 'ferr liberada'; el.href = p.url;
+      el.innerHTML = '<div class="status">● Liberada</div>';
+    } else {
+      el = document.createElement(compra && !/COLE_AQUI/.test(compra) ? 'a' : 'div');
+      el.className = 'ferr bloqueada';
+      if(el.tagName === 'A'){ el.href = compra; el.target = '_blank'; el.rel = 'noopener'; }
+      el.innerHTML = '<div class="status">Não adquirida — conhecer</div>';
+    }
+    el.insertAdjacentHTML('beforeend', '<div class="nome"></div><div class="desc"></div>');
+    el.querySelector('.nome').textContent = p.nome;
+    el.querySelector('.desc').textContent = p.desc;
+    grade.appendChild(el);
+  });
+  mostrar('tela-hub');
+}
+
+(async () => {
+  App.faixaDemo();
+  const s = await App.sessao();
+  if(s) await abrirHub(); else mostrar('tela-login');
+})();
+</script>
+</body>
+</html>

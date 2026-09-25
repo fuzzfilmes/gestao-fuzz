@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configurar Calculadora</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/estilo.css">
+<style>
+  .wiz{max-width:680px;margin:0 auto;padding:40px 16px 60px;}
+  .wiz .cartao{max-width:none;padding:30px 30px 26px;}
+  .passos{display:flex;gap:6px;margin:0 0 26px;flex-wrap:wrap;}
+  .passo{
+    flex:1;min-width:92px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:transparent;
+    font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-soft);cursor:pointer;text-align:left;
+  }
+  .passo .n{display:block;color:var(--text-faint);margin-bottom:2px;}
+  .passo.atual{border-color:var(--accent);color:var(--text);}
+  .passo.atual .n{color:var(--accent);}
+  .passo.feito{color:var(--text);}
+  .passo:disabled{cursor:default;opacity:.5;}
+  .etapa{display:none;}
+  .etapa.ativa{display:block;}
+
+  /* etapa 1 — áreas */
+  .areas{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;}
+  .area{
+    position:relative;border:1px solid var(--line);border-radius:10px;padding:16px 14px 14px 42px;background:var(--panel-2);cursor:pointer;transition:.15s;
+  }
+  .area:hover{border-color:#3a3f46;}
+  .area input{position:absolute;opacity:0;pointer-events:none;}
+  .area .caixa{
+    position:absolute;left:14px;top:17px;width:16px;height:16px;border:1px solid var(--text-soft);border-radius:4px;
+  }
+  .area .nome{font-weight:600;font-size:14px;}
+  .area .desc{font-size:11.5px;color:var(--text-soft);margin-top:3px;line-height:1.5;}
+  .area.on{border-color:var(--accent);background:var(--accent-dim);}
+  .area.on .caixa{background:var(--accent);border-color:var(--accent);}
+  .area.on .caixa:after{content:'✓';color:#fff;font-size:11px;position:absolute;left:2px;top:-1px;font-weight:700;}
+
+  /* etapa 2 — hora */
+  .hora-resultado{
+    margin-top:16px;padding:18px;border:1px solid rgba(255,59,48,.3);background:var(--accent-dim);border-radius:10px;text-align:center;
+  }
+  .hora-resultado .k{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-soft);}
+  .hora-resultado .v{font-family:var(--mono);font-size:30px;font-weight:700;margin-top:6px;}
+  .hora-resultado .conta{font-family:var(--mono);font-size:11px;color:var(--text-soft);margin-top:6px;}
+  .valor-hora-box{margin-top:22px;padding-top:18px;border-top:1px solid var(--line);}
+  .valor-hora-box input{font-size:20px;font-weight:700;padding:12px;}
+
+  /* etapa 3 — serviços */
+  .bloco-area{margin-bottom:22px;}
+  .bloco-area h3{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-soft);margin:0 0 8px;}
+  .serv{
+    display:grid;grid-template-columns:auto 1fr 118px 92px auto;gap:8px;align-items:center;
+    padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--panel-2);
+  }
+  .serv.off{opacity:.5;}
+  .serv input[type=text], .serv input[type=number], .serv select{padding:7px 8px;font-size:12px;background:var(--panel);}
+  .serv .un{font-family:var(--mono);font-size:10.5px;color:var(--text-soft);white-space:nowrap;}
+  .serv .base{font-family:var(--mono);font-size:9.5px;color:var(--good);letter-spacing:.06em;display:block;margin-top:2px;}
+  .serv .rm{background:none;border:1px solid var(--line);color:var(--text-soft);cursor:pointer;width:26px;height:26px;border-radius:5px;}
+  .serv .rm:hover{border-color:var(--accent);color:var(--accent);}
+  .serv .rm.vazio{visibility:hidden;}
+  .serv-cab{display:grid;grid-template-columns:auto 1fr 118px 92px auto;gap:8px;padding:0 10px 4px;font-size:10px;color:var(--text-faint);font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;}
+  .serv-cab span:first-child{width:34px;}
+  .novo-serv{border:1px dashed var(--line);border-radius:8px;padding:12px;margin-top:8px;display:none;}
+  .novo-serv.aberto{display:block;}
+
+  .logo-row{display:flex;align-items:center;gap:12px;}
+  .logo-preview{
+    width:72px;height:72px;flex:0 0 auto;border:1px dashed var(--line);border-radius:8px;
+    background:var(--panel-2) center/contain no-repeat;display:flex;align-items:center;justify-content:center;
+    font-size:10px;color:var(--text-soft);text-align:center;
+  }
+  .logo-row .acoes{display:flex;flex-direction:column;gap:6px;}
+
+  .nav{display:flex;gap:10px;margin-top:26px;}
+  .nav .btn{margin-top:0;}
+  .nav .btn.sec{flex:0 0 140px;}
+
+  @media (max-width:600px){
+    .wiz .cartao{padding:24px 16px 20px;}
+    .passo{min-width:0;font-size:0;padding:8px 0;text-align:center;}
+    .passo .n{font-size:11px;margin:0;}
+    .serv-cab{display:none;}
+    .serv{grid-template-columns:auto 1fr auto;position:relative;padding-right:40px;}
+    .serv > div:nth-child(2){grid-column:2 / 4;}
+    .serv > div:nth-child(3){grid-column:2;}
+    .serv .un{grid-column:3;}
+    .serv .rm{position:absolute;right:6px;top:8px;}
+    .serv .rm.vazio{display:none;}
+    .serv:has(.rm.vazio){padding-right:10px;}
+    .nav .btn.sec{flex:0 0 100px;}
+  }
+</style>
+</head>
+<body>
+<div class="carregando" id="carregando">CARREGANDO…</div>
+
+<div class="wiz" id="wiz" style="display:none;">
+  <div class="cartao visor"><span class="br-tr"></span><span class="br-bl"></span>
+    <div class="eyebrow" id="wiz-eyebrow">Configuração inicial</div>
+    <h1 id="wiz-titulo">Vamos calibrar sua calculadora</h1>
+    <p class="sub">Leva uns 3 minutos. Você pode mudar tudo depois em “Configurações”.</p>
+
+    <div class="passos" id="passos"></div>
+
+    <!-- 1. ATUAÇÃO -->
+    <section class="etapa" data-etapa="1">
+      <div class="group" style="border:none;padding:0;">
+        <h2>Com o que você trabalha?</h2>
+        <p class="dica" style="margin:0 0 14px;">Marque todas as áreas em que você presta serviço. Só os serviços dessas áreas vão aparecer na calculadora.</p>
+        <div class="areas" id="areas"></div>
+        <div class="msg" id="msg-1"></div>
+      </div>
+    </section>
+
+    <!-- 2. VALOR DA HORA -->
+    <section class="etapa" data-etapa="2">
+      <div class="group" style="border:none;padding:0;">
+        <h2>Quanto vale a sua hora?</h2>
+        <p class="dica" style="margin:0 0 6px;">Não sabe? Preencha os três campos e a gente calcula a hora mínima pra você pagar suas contas e ter o salário que quer.</p>
+        <div class="row3">
+          <div>
+            <label>Quanto quer ganhar por mês (R$)</label>
+            <input type="number" id="h-renda" min="0" step="100">
+          </div>
+          <div>
+            <label>Custos do negócio por mês (R$)</label>
+            <input type="number" id="h-custos" min="0" step="50">
+          </div>
+          <div>
+            <label>Horas de trabalho cobrável por semana</label>
+            <input type="number" id="h-horas" min="1" step="1">
+          </div>
+        </div>
+        <p class="dica">Custos: aluguel, internet, softwares, manutenção e reserva pra trocar equipamento. Horas cobráveis são só as que você vende, sem contar tempo de prospecção, administrativo e redes.</p>
+        <div class="hora-resultado">
+          <div class="k">Sua hora mínima</div>
+          <div class="v" id="h-sugerida">R$ 0,00</div>
+          <div class="conta" id="h-conta"></div>
+          <button type="button" class="mini-btn" id="h-usar" style="margin-top:12px;">Usar este valor ↓</button>
+        </div>
+        <div class="valor-hora-box">
+          <label style="margin-top:0;">Valor da minha hora (R$)</label>
+          <input type="number" id="h-valor" min="0" step="1">
+          <p class="dica">É o ponto de partida de todos os serviços cobrados por hora. Na próxima etapa você pode cobrar diferente em algum serviço (ex: captação mais cara que edição).</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. SERVIÇOS -->
+    <section class="etapa" data-etapa="3">
+      <div class="group" style="border:none;padding:0;">
+        <h2>Seus serviços e preços</h2>
+        <p class="dica" style="margin:0 0 16px;">Ligue o que você oferece, ajuste nomes e valores. <span style="color:var(--good);">“= sua hora”</span> acompanha o valor da sua hora automaticamente.</p>
+        <div id="lista-servicos"></div>
+
+        <div class="bloco-area">
+          <h3>Meus serviços</h3>
+          <div id="lista-custom"></div>
+          <button type="button" class="add-btn" id="btn-novo-serv">+ criar serviço próprio</button>
+          <div class="novo-serv" id="novo-serv">
+            <label style="margin-top:0;">Nome do serviço</label>
+            <input type="text" id="ns-nome" placeholder="Ex: Diária de assistente">
+            <div class="row3">
+              <div>
+                <label>Cobrado por</label>
+                <select id="ns-unidade"></select>
+              </div>
+              <div>
+                <label>Valor (R$)</label>
+                <input type="number" id="ns-preco" min="0" step="1">
+              </div>
+              <div>
+                <label>Entra no pacote</label>
+                <select id="ns-cobranca">
+                  <option value="entrega">Por entrega</option>
+                  <option value="unico">Uma vez só</option>
+                </select>
+              </div>
+            </div>
+            <p class="dica">“Por entrega” multiplica pela quantidade de vídeos/episódios do pacote. “Uma vez só” entra uma única vez (equipamento, deslocamento…).</p>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button type="button" class="btn inline" id="ns-add">Adicionar</button>
+              <button type="button" class="btn sec inline" id="ns-cancelar">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. IMPOSTOS E PACOTES -->
+    <section class="etapa" data-etapa="4">
+      <div class="group">
+        <h2>Imposto</h2>
+        <div class="row2">
+          <div>
+            <label>Alíquota sobre a nota (%)</label>
+            <input type="number" id="i-pct" min="0" step="0.5">
+          </div>
+          <div>
+            <label>Como tratar no orçamento</label>
+            <select id="i-modo">
+              <option value="informativo">Só mostrar pra mim</option>
+              <option value="somar">Somar ao valor do cliente</option>
+            </select>
+          </div>
+        </div>
+        <p class="dica">Não emite nota? Coloque 0. MEI costuma deixar 0 aqui e considerar o DAS nos custos do mês.</p>
+      </div>
+      <div class="group">
+        <h2>Pacotes</h2>
+        <div class="toggle-row">
+          <label>Dar desconto progressivo quando o cliente fecha várias entregas</label>
+          <div class="switch"><input type="checkbox" id="d-ativo"><div class="track"></div><div class="thumb"></div></div>
+        </div>
+        <label>Desconto por entrega adicional (%)</label>
+        <input type="number" id="d-pct" min="0" max="90" step="1">
+        <p class="dica">Ex: 10% → a 2ª entrega sai 10% mais barata que a 1ª, a 3ª 10% mais barata que a 2ª, e assim por diante.</p>
+      </div>
+      <div class="group">
+        <h2>Validade</h2>
+        <label>Orçamento válido por (dias)</label>
+        <input type="number" id="v-dias" min="0" step="1">
+      </div>
+    </section>
+
+    <!-- 5. NEGÓCIO -->
+    <section class="etapa" data-etapa="5">
+      <div class="group" style="border:none;padding:0;">
+        <h2>Seu negócio</h2>
+        <p class="dica" style="margin:0 0 6px;">Isso aparece no topo dos orçamentos que você envia.</p>
+        <label>Nome</label>
+        <input type="text" id="n-nome" placeholder="Ex: Estúdio Fulano">
+        <label>Contato (WhatsApp, e-mail ou Instagram)</label>
+        <input type="text" id="n-contato" placeholder="Ex: (51) 99999-9999 · @estudiofulano">
+        <label>Logo (opcional — PNG ou JPG)</label>
+        <div class="logo-row">
+          <div class="logo-preview" id="n-logo-preview">sem logo</div>
+          <div class="acoes">
+            <button type="button" class="mini-btn" id="n-logo-escolher">Escolher imagem…</button>
+            <button type="button" class="mini-btn" id="n-logo-remover">Remover logo</button>
+          </div>
+          <input type="file" id="n-logo-file" accept="image/png,image/jpeg,image/webp" style="display:none">
+        </div>
+        <p class="dica">Dica: logo com fundo transparente (PNG) fica melhor no orçamento escuro.</p>
+      </div>
+    </section>
+
+    <div class="msg" id="msg"></div>
+    <div class="nav">
+      <button type="button" class="btn sec" id="btn-voltar">Voltar</button>
+      <button type="button" class="btn" id="btn-avancar">Continuar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/config.js"></script>
+<script>window.RAIZ = '../';</script>
+<script src="../assets/app.js"></script>
+<script src="catalogo.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const K = window.Catalogo;
+const PASSOS = ['Atuação', 'Sua hora', 'Serviços', 'Impostos', 'Negócio'];
+let cfg, etapa = 1, editando = false;
+
+const fmt = (n) => (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+// ---------------- navegação ----------------
+function renderPassos(){
+  const host = $('passos'); host.innerHTML = '';
+  PASSOS.forEach((nome, i) => {
+    const n = i + 1;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'passo' + (n === etapa ? ' atual' : '') + (n < etapa ? ' feito' : '');
+    b.innerHTML = '<span class="n">0' + n + '</span>' + nome;
+    // quem já configurou antes pode pular direto; na 1ª vez, só volta
+    b.disabled = !(editando || n <= etapa);
+    b.onclick = () => irPara(n);
+    host.appendChild(b);
+  });
+}
+
+function irPara(n){
+  if(n > etapa && !validar(etapa)) return;
+  coletar(etapa);
+  etapa = n;
+  document.querySelectorAll('.etapa').forEach((s) => s.classList.toggle('ativa', Number(s.dataset.etapa) === etapa));
+  if(etapa === 3) renderServicos();
+  $('btn-voltar').style.visibility = etapa === 1 ? 'hidden' : 'visible';
+  $('btn-avancar').textContent = etapa === PASSOS.length ? 'Salvar e abrir a calculadora' : 'Continuar';
+  $('msg').className = 'msg';
+  renderPassos();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function validar(n){
+  if(n === 1 && cfg.areas.length === 0){
+    const m = $('msg-1'); m.className = 'msg erro'; m.textContent = 'Escolha pelo menos uma área.';
+    return false;
+  }
+  if(n === 2 && !(num($('h-valor').value) > 0)){
+    $('msg').className = 'msg erro'; $('msg').textContent = 'Informe o valor da sua hora (ou use o valor calculado).';
+    return false;
+  }
+  return true;
+}
+
+// lê os campos da etapa pro objeto cfg
+function coletar(n){
+  if(n === 2){
+    cfg.calcHora = { renda: num($('h-renda').value), custos: num($('h-custos').value), horasSemana: num($('h-horas').value) };
+    cfg.valorHora = num($('h-valor').value);
+  }
+  if(n === 4){
+    cfg.imposto = { pct: num($('i-pct').value), modo: $('i-modo').value };
+    cfg.desconto = { ativo: $('d-ativo').checked, pct: num($('d-pct').value) };
+    cfg.validade = Math.max(0, parseInt($('v-dias').value) || 0);
+  }
+  if(n === 5){
+    cfg.negocio.nome = $('n-nome').value.trim();
+    cfg.negocio.contato = $('n-contato').value.trim();
+  }
+}
+
+$('btn-voltar').onclick = () => irPara(Math.max(1, etapa - 1));
+$('btn-avancar').onclick = async () => {
+  if(!validar(etapa)) return;
+  if(etapa < PASSOS.length){ irPara(etapa + 1); return; }
+  coletar(etapa);
+  const b = $('btn-avancar'); b.disabled = true; b.textContent = 'Salvando…';
+  try{
+    await App.salvarConfig('calculadora', cfg);
+    location.href = 'index.html';
+  }catch(e){
+    $('msg').className = 'msg erro'; $('msg').textContent = App.mensagemErro(e);
+    b.disabled = false; b.textContent = 'Salvar e abrir a calculadora';
+  }
+};
+
+// ---------------- etapa 1 ----------------
+function renderAreas(){
+  const host = $('areas'); host.innerHTML = '';
+  K.AREAS.forEach((a) => {
+    const el = document.createElement('label');
+    el.className = 'area' + (cfg.areas.includes(a.id) ? ' on' : '');
+    el.innerHTML = '<input type="checkbox"><span class="caixa"></span><div class="nome"></div><div class="desc"></div>';
+    el.querySelector('.nome').textContent = a.nome;
+    el.querySelector('.desc').textContent = a.desc;
+    const cb = el.querySelector('input');
+    cb.checked = cfg.areas.includes(a.id);
+    cb.onchange = () => {
+      cfg.areas = cb.checked ? [...new Set([...cfg.areas, a.id])] : cfg.areas.filter((x) => x !== a.id);
+      el.classList.toggle('on', cb.checked);
+      $('msg-1').className = 'msg';
+    };
+    host.appendChild(el);
+  });
+}
+
+// ---------------- etapa 2 ----------------
+function calcularHora(){
+  const renda = num($('h-renda').value), custos = num($('h-custos').value), horas = num($('h-horas').value);
+  const horasMes = horas * 4.33;
+  const hora = horasMes > 0 ? (renda + custos) / horasMes : 0;
+  $('h-sugerida').textContent = 'R$ ' + fmt(hora);
+  $('h-conta').textContent = horasMes > 0
+    ? '(R$ ' + fmt(renda) + ' + R$ ' + fmt(custos) + ') ÷ ' + Math.round(horasMes) + ' h/mês'
+    : 'preencha as horas por semana';
+  return hora;
+}
+['h-renda','h-custos','h-horas'].forEach((id) => $(id).addEventListener('input', calcularHora));
+$('h-usar').onclick = () => { $('h-valor').value = Math.ceil(calcularHora()); $('msg').className = 'msg'; };
+
+// ---------------- etapa 3 ----------------
+function linhaServico(s, removivel){
+  const row = document.createElement('div');
+  row.className = 'serv' + (s.ativo ? '' : ' off');
+  row.innerHTML =
+    '<div class="switch"><input type="checkbox"><div class="track"></div><div class="thumb"></div></div>' +
+    '<div><input type="text" class="s-nome"></div>' +
+    '<div><input type="number" class="s-preco" min="0" step="1"><span class="base"></span></div>' +
+    '<span class="un"></span>' +
+    '<button type="button" class="rm' + (removivel ? '' : ' vazio') + '" title="remover">×</button>';
+  const cb = row.querySelector('input[type=checkbox]');
+  const nome = row.querySelector('.s-nome');
+  const preco = row.querySelector('.s-preco');
+  const base = row.querySelector('.base');
+  cb.checked = s.ativo;
+  nome.value = s.nome;
+  preco.value = K.precoDe(s, cfg);
+  const atualizarBase = () => { base.textContent = s.usaHoraBase ? '= sua hora' : ''; };
+  atualizarBase();
+  const u = K.UNIDADES[s.unidade] || K.UNIDADES.unidade;
+  row.querySelector('.un').textContent = '/ ' + u.s + (s.cobranca === 'unico' ? ' · 1×' : '');
+  row.querySelector('.un').title = s.cobranca === 'unico' ? 'Entra uma vez só no orçamento' : 'Multiplica pelas entregas do pacote';
+  cb.onchange = () => { s.ativo = cb.checked; row.classList.toggle('off', !s.ativo); };
+  nome.oninput = () => { s.nome = nome.value; };
+  preco.oninput = () => {
+    const v = num(preco.value);
+    s.preco = v;
+    s.usaHoraBase = s.unidade === 'hora' && v === Number(cfg.valorHora) && s.area !== 'extra' && s.id !== 'extra_estudio';
+    atualizarBase();
+  };
+  row.querySelector('.rm').onclick = () => {
+    if(!removivel) return;
+    cfg.servicos = cfg.servicos.filter((x) => x !== s);
+    renderServicos();
+  };
+  return row;
+}
+
+function renderServicos(){
+  const host = $('lista-servicos'); host.innerHTML = '';
+  const areas = [...cfg.areas, 'extra'];
+  areas.forEach((areaId) => {
+    const doArea = cfg.servicos.filter((s) => s.area === areaId && !s.custom);
+    if(!doArea.length) return;
+    const bloco = document.createElement('div');
+    bloco.className = 'bloco-area';
+    bloco.innerHTML = '<h3></h3><div class="serv-cab"><span></span><span>Serviço</span><span>Valor (R$)</span><span class="c-un">Por</span><span class="c-rm" style="width:26px"></span></div>';
+    bloco.querySelector('h3').textContent = K.nomeArea(areaId);
+    doArea.forEach((s) => bloco.appendChild(linhaServico(s, false)));
+    host.appendChild(bloco);
+  });
+  const hc = $('lista-custom'); hc.innerHTML = '';
+  cfg.servicos.filter((s) => s.custom).forEach((s) => hc.appendChild(linhaServico(s, true)));
+}
+
+Object.entries(K.UNIDADES).forEach(([id, u]) => {
+  const o = document.createElement('option'); o.value = id; o.textContent = u.s; $('ns-unidade').appendChild(o);
+});
+$('btn-novo-serv').onclick = () => { $('novo-serv').classList.add('aberto'); $('btn-novo-serv').style.display = 'none'; $('ns-nome').focus(); };
+$('ns-cancelar').onclick = () => { $('novo-serv').classList.remove('aberto'); $('btn-novo-serv').style.display = ''; };
+$('ns-add').onclick = () => {
+  const nome = $('ns-nome').value.trim();
+  if(!nome){ $('ns-nome').focus(); return; }
+  const unidade = $('ns-unidade').value;
+  const preco = num($('ns-preco').value);
+  cfg.servicos.push({
+    id: 'custom_' + Date.now().toString(36), area: 'custom', nome, unidade,
+    cobranca: $('ns-cobranca').value, ativo: true, preco,
+    usaHoraBase: unidade === 'hora' && preco === Number(cfg.valorHora), custom: true
+  });
+  $('ns-nome').value = ''; $('ns-preco').value = '';
+  $('ns-cancelar').onclick();
+  renderServicos();
+};
+
+// ---------------- etapa 5 ----------------
+function mostrarLogo(){
+  const el = $('n-logo-preview');
+  if(cfg.negocio.logo){ el.style.backgroundImage = 'url(' + cfg.negocio.logo + ')'; el.textContent = ''; }
+  else { el.style.backgroundImage = ''; el.textContent = 'sem logo'; }
+}
+$('n-logo-escolher').onclick = () => $('n-logo-file').click();
+$('n-logo-remover').onclick = () => { cfg.negocio.logo = ''; mostrarLogo(); };
+$('n-logo-file').onchange = async (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if(!f) return;
+  try{ cfg.negocio.logo = await App.reduzirImagem(f, 480); mostrarLogo(); }
+  catch(e){ $('msg').className = 'msg erro'; $('msg').textContent = e.message; }
+};
+
+// ---------------- início ----------------
+function preencherCampos(){
+  $('h-renda').value = cfg.calcHora.renda;
+  $('h-custos').value = cfg.calcHora.custos;
+  $('h-horas').value = cfg.calcHora.horasSemana;
+  $('h-valor').value = cfg.valorHora;
+  calcularHora();
+  $('i-pct').value = cfg.imposto.pct;
+  $('i-modo').value = cfg.imposto.modo;
+  $('d-ativo').checked = !!cfg.desconto.ativo;
+  $('d-pct').value = cfg.desconto.pct;
+  $('v-dias').value = cfg.validade;
+  $('n-nome').value = cfg.negocio.nome;
+  $('n-contato').value = cfg.negocio.contato;
+  mostrarLogo();
+}
+
+(async () => {
+  App.faixaDemo();
+  await App.exigirAcesso('calculadora');
+  let salvo = null;
+  try{ salvo = await App.lerConfig('calculadora'); }catch(e){ console.error(e); }
+  editando = !!salvo;
+  cfg = K.completar(salvo);
+  if(editando){
+    $('wiz-eyebrow').textContent = 'Configurações';
+    $('wiz-titulo').textContent = 'Ajuste sua calculadora';
+  }
+  renderAreas();
+  preencherCampos();
+  $('carregando').style.display = 'none';
+  $('wiz').style.display = 'block';
+  irPara(1);
+})();
+</script>
+</body>
+</html>

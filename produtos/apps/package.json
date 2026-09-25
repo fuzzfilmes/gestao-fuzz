@@ -1,0 +1,12 @@
+{
+  "name": "ferramentas",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Ferramentas vendidas via Hotmart — login, calculadora e liberação automática de acesso",
+  "scripts": {
+    "test": "node testes/webhook.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}

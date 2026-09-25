@@ -1,0 +1,23 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# endereços curtos pras funções
+[[redirects]]
+  from = "/api/hotmart-webhook"
+  to = "/.netlify/functions/hotmart-webhook"
+  status = 200
+
+[[redirects]]
+  from = "/api/primeiro-acesso"
+  to = "/.netlify/functions/primeiro-acesso"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"

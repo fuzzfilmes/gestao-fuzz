@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Criar Senha</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/estilo.css">
+</head>
+<body>
+<div class="carregando" id="carregando">VALIDANDO LINK…</div>
+
+<div class="centro" id="tela" style="display:none;">
+  <div class="cartao visor"><span class="br-tr"></span><span class="br-bl"></span>
+    <div class="rec"><span class="dot"></span><span class="t" data-marca>Ferramentas</span></div>
+    <h1>Crie sua senha</h1>
+    <p class="sub" id="sub"></p>
+    <form id="form">
+      <label for="s1">Nova senha (mínimo 6 caracteres)</label>
+      <input type="password" id="s1" autocomplete="new-password" minlength="6" required>
+      <label for="s2">Repita a senha</label>
+      <input type="password" id="s2" autocomplete="new-password" minlength="6" required>
+      <button class="btn" type="submit" id="btn">Salvar senha e entrar</button>
+    </form>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<div class="centro" id="expirado" style="display:none;">
+  <div class="cartao visor"><span class="br-tr"></span><span class="br-bl"></span>
+    <div class="eyebrow">Link inválido</div>
+    <h1>Esse link expirou ou já foi usado</h1>
+    <p class="sub">Sem problema: peça um novo na tela de login, em “Primeiro acesso ou esqueci a senha”.</p>
+    <a class="btn" href="index.html">Ir para o login</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="assets/config.js"></script>
+<script>window.RAIZ = './';</script>
+<script src="assets/app.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+document.querySelectorAll('[data-marca]').forEach((el) => el.textContent = App.config.MARCA || 'Ferramentas');
+
+(async () => {
+  App.faixaDemo();
+  // erros vindos do Supabase no próprio link (ex: otp_expired)
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const s = hash.get('error') ? null : await App.aguardarSessaoDoLink();
+  $('carregando').style.display = 'none';
+  if(!s){ $('expirado').style.display = 'flex'; return; }
+  $('sub').textContent = 'Conta: ' + s.email + '. Você vai usar este e-mail e a senha abaixo para entrar sempre.';
+  $('tela').style.display = 'flex';
+})();
+
+$('form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const m = $('msg');
+  if($('s1').value !== $('s2').value){ m.className = 'msg erro'; m.textContent = 'As duas senhas não são iguais.'; return; }
+  $('btn').disabled = true;
+  try{
+    await App.definirSenha($('s1').value);
+    m.className = 'msg ok'; m.textContent = 'Senha criada! Abrindo suas ferramentas…';
+    setTimeout(() => location.replace('index.html'), 900);
+  }catch(e){
+    m.className = 'msg erro'; m.textContent = App.mensagemErro(e);
+    $('btn').disabled = false;
+  }
+};
+</script>
+</body>
+</html>
