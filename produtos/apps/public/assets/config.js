@@ -7,10 +7,10 @@
 // MODO DEMONSTRAÇÃO: sem login, dados salvos só no navegador.
 // =====================================================================
 window.FERRAMENTAS_CONFIG = {
-  SUPABASE_URL: 'COLE_AQUI',
-  SUPABASE_ANON_KEY: 'COLE_AQUI',
+  SUPABASE_URL: 'https://ekvzilcgbnyukosurcrg.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_K6HlbbhjIu-ip5FJ0_Zl2A_bCM_Yux7',
 
-  MARCA: 'Ferramentas',                        // nome da linha de produtos (troque quando definir)
+  MARCA: 'Fuzz Ferramentas',                      // nome da linha de produtos (troque quando definir)
   SUPORTE: 'suporte@SEU-DOMINIO.com.br',       // e-mail de suporte exibido nas telas
 
   // link de compra (checkout Hotmart) de cada ferramenta — aparece pra quem não tem acesso
