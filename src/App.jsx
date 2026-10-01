@@ -62,7 +62,6 @@ const TAB_LABELS = {
 };
 const RETENCAO_DIAS = 30;
 
-const CATEGORIAS_RECEITA = ["Produção", "Consultoria", "Outro"];
 const CATEGORIA_DESPESA_RESERVA = "Reserva";
 const TIPO_RECEITA_RETIRADA_RESERVA = "Retirada de Reserva";
 const STATUS_PAGAMENTO = ["Pendente", "Pago"];
@@ -237,7 +236,7 @@ const emptyTransacao = (tipo = "Receita") => ({
   id: "t_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
   tipo,
   descricao: "",
-  categoria: tipo === "Receita" ? CATEGORIAS_RECEITA[0] : "",
+  categoria: "",
   tipoReceita: "",
   natureza: "Variável",
   valor: "",
@@ -1675,7 +1674,7 @@ export default function App() {
     addTipoReceita(TIPO_RECEITA_RETIRADA_RESERVA);
     const nova = {
       ...emptyTransacao("Receita"),
-      categoria: tiposProducao[0] || CATEGORIAS_RECEITA[0],
+      categoria: "",
       tipoReceita: TIPO_RECEITA_RETIRADA_RESERVA,
       descricao: retiradaReservaForm.descricao.trim() || "Retirada da reserva",
       valor: String(valor),
@@ -2128,6 +2127,9 @@ export default function App() {
       if (d.id !== demandId) return d;
       const itens = (d.itens || []).map((it) => (it.id === itemId ? { ...it, [field]: value } : it));
       let atualizado = { ...d, itens };
+      if (field === "status" && (value === "Aguardando aprovação" || value === "Finalizada")) {
+        atualizado.dataEnvioAprovacao = atualizado.dataEnvioAprovacao || todayISO();
+      }
       if (field === "status" && itens.length > 0 && itens.every((it) => it.status === "Finalizada") && atualizado.status !== "Finalizada") {
         atualizado.status = "Finalizada";
         atualizado.dataAprovacao = atualizado.dataAprovacao || todayISO();
@@ -2141,6 +2143,9 @@ export default function App() {
     const list = demandsRef.current.map((d) => {
       if (d.id !== demandId) return d;
       const atualizado = { ...d, [field]: value };
+      if (field === "status" && (value === "Aguardando aprovação" || value === "Finalizada")) {
+        atualizado.dataEnvioAprovacao = atualizado.dataEnvioAprovacao || todayISO();
+      }
       if (field === "status" && value === "Finalizada") {
         atualizado.dataAprovacao = atualizado.dataAprovacao || todayISO();
       }
@@ -2926,6 +2931,7 @@ export default function App() {
     switch (key) {
       case "descricao": return t.descricao || "";
       case "categoria": return t.categoria || "";
+      case "tipoReceita": return t.tipoReceita || "";
       case "natureza": return t.natureza || "Variável";
       case "cliente": {
         const d = demands.find((x) => x.id === t.demandaId);
@@ -4498,7 +4504,7 @@ export default function App() {
                         <select value={financeStatusReceitaFilter} onChange={(e) => setFinanceStatusReceitaFilter(e.target.value)}>
                           <option value="todos">Todos os status</option>
                           <option value="atrasadas">Só atrasadas</option>
-                          <option value="pagas">Só pagas</option>
+                          <option value="pagas">Só recebidas</option>
                           <option value="pendentes">Só pendentes</option>
                         </select>
                       </div>
@@ -4518,7 +4524,7 @@ export default function App() {
                     <thead>
                       <tr>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "descricao")}>Descrição {financeReceitasSortKey === "descricao" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "categoria")}>Categoria {financeReceitasSortKey === "categoria" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "tipoReceita")}>Tipo de receita {financeReceitasSortKey === "tipoReceita" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "cliente")}>Cliente / Demanda {financeReceitasSortKey === "cliente" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "valor")}>Valor {financeReceitasSortKey === "valor" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "vencimento")}>Vencimento {financeReceitasSortKey === "vencimento" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
@@ -4540,7 +4546,7 @@ export default function App() {
                                 </span>
                               )}
                             </td>
-                            <td>{t.categoria}</td>
+                            <td>{t.tipoReceita}</td>
                             <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
                             <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                             <td className="mono">{fmtDate(t.data)}</td>
@@ -4548,9 +4554,9 @@ export default function App() {
                               <button
                                 className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
                                 onClick={() => toggleStatusPagamento(t)}
-                                title="Clique para alternar pago/pendente"
+                                title="Clique para alternar recebido/pendente"
                               >
-                                {statusEfetivo}
+                                {statusEfetivo === "Pago" ? "Recebido" : statusEfetivo}
                               </button>
                             </td>
                             <td>
@@ -5844,8 +5850,17 @@ export default function App() {
                   <select
                     value={v.status}
                     onChange={(e) => {
-                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, status: e.target.value } : it));
-                      setDemandForm({ ...demandForm, itens });
+                      const novoValor = e.target.value;
+                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, status: novoValor } : it));
+                      const enviaAprovacao = novoValor === "Aguardando aprovação" || novoValor === "Finalizada";
+                      const todasFinalizadas = itens.length > 0 && itens.every((it) => it.status === "Finalizada");
+                      setDemandForm({
+                        ...demandForm,
+                        itens,
+                        status: todasFinalizadas ? "Finalizada" : demandForm.status,
+                        dataAprovacao: todasFinalizadas ? demandForm.dataAprovacao || todayISO() : demandForm.dataAprovacao,
+                        dataEnvioAprovacao: enviaAprovacao ? demandForm.dataEnvioAprovacao || todayISO() : demandForm.dataEnvioAprovacao,
+                      });
                     }}
                   >
                     {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
@@ -5893,10 +5908,12 @@ export default function App() {
                 value={demandForm.status}
                 onChange={(e) => {
                   const novoValor = e.target.value;
+                  const enviaAprovacao = novoValor === "Aguardando aprovação" || novoValor === "Finalizada";
                   setDemandForm({
                     ...demandForm,
                     status: novoValor,
                     dataAprovacao: novoValor === "Finalizada" ? demandForm.dataAprovacao || todayISO() : demandForm.dataAprovacao,
+                    dataEnvioAprovacao: enviaAprovacao ? demandForm.dataEnvioAprovacao || todayISO() : demandForm.dataEnvioAprovacao,
                   });
                 }}
                 style={{ borderLeft: "3px solid " + corStatusDemanda(demandForm.status) }}
@@ -6173,34 +6190,41 @@ export default function App() {
               {transacoes.some((t) => t.id === transacaoForm.id) ? "Editar transação" : "Nova " + transacaoForm.tipo.toLowerCase()}
               <X size={18} style={{ cursor: "pointer" }} onClick={() => { setTransacaoForm(null); setParcelasInput(1); setRepeticaoFreq("mensal"); }} />
             </h3>
-            <div className="grid2">
-              <div className="field">
-                <label>Tipo</label>
-                <select
-                  value={transacaoForm.tipo}
-                  onChange={(e) => {
-                    const tipo = e.target.value;
-                    setTransacaoForm({
-                      ...transacaoForm,
-                      tipo,
-                      categoria: tipo === "Receita" ? (tiposProducao[0] || "") : (tags[0]?.nome || ""),
-                      tipoReceita: tipo === "Receita" ? (transacaoForm.tipoReceita || tiposReceita[0] || "") : transacaoForm.tipoReceita,
-                    });
-                  }}
-                >
-                  <option>Receita</option>
-                  <option>Despesa</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>{transacaoForm.tipo === "Receita" ? "Tipo de produção" : "Categoria"}</label>
-                <select value={transacaoForm.categoria} onChange={(e) => setTransacaoForm({ ...transacaoForm, categoria: e.target.value })}>
-                  {(transacaoForm.tipo === "Receita" ? tiposProducao : tags.map((tg) => tg.nome)).map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            {(() => {
+              const tipoSelect = (
+                <div className="field">
+                  <label>Tipo</label>
+                  <select
+                    value={transacaoForm.tipo}
+                    onChange={(e) => {
+                      const tipo = e.target.value;
+                      setTransacaoForm({
+                        ...transacaoForm,
+                        tipo,
+                        categoria: tipo === "Receita" ? "" : (tags[0]?.nome || ""),
+                        tipoReceita: tipo === "Receita" ? (transacaoForm.tipoReceita || tiposReceita[0] || "") : transacaoForm.tipoReceita,
+                      });
+                    }}
+                  >
+                    <option>Receita</option>
+                    <option>Despesa</option>
+                  </select>
+                </div>
+              );
+              return transacaoForm.tipo === "Despesa" ? (
+                <div className="grid2">
+                  {tipoSelect}
+                  <div className="field">
+                    <label>Categoria</label>
+                    <select value={transacaoForm.categoria} onChange={(e) => setTransacaoForm({ ...transacaoForm, categoria: e.target.value })}>
+                      {tags.map((tg) => <option key={tg.nome} value={tg.nome}>{tg.nome}</option>)}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                tipoSelect
+              );
+            })()}
             {transacaoForm.tipo === "Receita" && (
               <div className="field">
                 <label>Tipo de receita</label>
@@ -6282,7 +6306,9 @@ export default function App() {
               <div className="field">
                 <label>Status</label>
                 <select value={transacaoForm.statusPagamento} onChange={(e) => setTransacaoForm({ ...transacaoForm, statusPagamento: e.target.value })}>
-                  {STATUS_PAGAMENTO.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {STATUS_PAGAMENTO.map((s) => (
+                    <option key={s} value={s}>{s === "Pago" && transacaoForm.tipo === "Receita" ? "Recebido" : s}</option>
+                  ))}
                 </select>
               </div>
               <div className="field">
