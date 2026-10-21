@@ -129,6 +129,35 @@ export async function syncNotasReuniao(prevList, nextList) {
   return syncRows("notas_reuniao", prevList, nextList, notaReuniaoToRow);
 }
 
+// ---------------- Contratos salvos (Gerador de Contrato) ----------------
+
+function contratoGeradoToRow(c) {
+  return {
+    id: c.id,
+    cliente_id: c.clienteId || null,
+    titulo: c.titulo || "",
+    dados: c.dados || {},
+    updated_at: new Date().toISOString(),
+  };
+}
+function contratoGeradoFromRow(r) {
+  return {
+    id: r.id,
+    clienteId: r.cliente_id || "",
+    titulo: r.titulo || "",
+    dados: r.dados || {},
+    atualizadoEm: r.updated_at || "",
+  };
+}
+export async function listContratosGerados() {
+  const res = await supabase.from("contratos_gerados").select("*").order("updated_at", { ascending: false });
+  throwIfError(res);
+  return res.data.map(contratoGeradoFromRow);
+}
+export async function syncContratosGerados(prevList, nextList) {
+  return syncRows("contratos_gerados", prevList, nextList, contratoGeradoToRow);
+}
+
 // ---------------- Demandas (+ demanda_itens) ----------------
 
 function demandaToRow(d) {

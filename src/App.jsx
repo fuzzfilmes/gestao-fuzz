@@ -1215,6 +1215,7 @@ export default function App() {
   const [proposals, setProposals] = useState([]);
   const [transacoes, setTransacoes] = useState([]);
   const [notasReuniao, setNotasReuniao] = useState([]);
+  const [contratosGerados, setContratosGerados] = useState([]);
   const [tiposProducao, setTiposProducao] = useState(DEFAULT_TIPOS);
   const [tiposReceita, setTiposReceita] = useState(DEFAULT_TIPOS_RECEITA);
   const [categoriasEquipamento, setCategoriasEquipamento] = useState(DEFAULT_CATEGORIAS_EQUIP);
@@ -1380,12 +1381,14 @@ export default function App() {
   const proposalsRef = useRef(proposals);
   const transacoesRef = useRef(transacoes);
   const notasReuniaoRef = useRef(notasReuniao);
+  const contratosGeradosRef = useRef(contratosGerados);
   const clientViewInfoRef = useRef(clientViewInfo);
   clientsRef.current = clients;
   demandsRef.current = demands;
   proposalsRef.current = proposals;
   transacoesRef.current = transacoes;
   notasReuniaoRef.current = notasReuniao;
+  contratosGeradosRef.current = contratosGerados;
   clientViewInfoRef.current = clientViewInfo;
 
   useEffect(() => {
@@ -1405,6 +1408,7 @@ export default function App() {
         load("propostas", api.listPropostas, setProposals, []),
         load("transações", api.listTransacoes, setTransacoes, []),
         load("notas de reunião", api.listNotasReuniao, setNotasReuniao, []),
+        load("contratos salvos", api.listContratosGerados, setContratosGerados, []),
         load("tipos de produção", () => api.seedTiposProducaoSeVazio(DEFAULT_TIPOS), setTiposProducao, DEFAULT_TIPOS),
         load("tipos de receita", () => api.seedTiposReceitaSeVazio(DEFAULT_TIPOS_RECEITA), setTiposReceita, DEFAULT_TIPOS_RECEITA),
         load(
@@ -1479,12 +1483,33 @@ export default function App() {
               type: "fuzz:init-contrato",
               payload: {
                 clientes: clientsRef.current,
+                contratos: contratosGeradosRef.current,
                 importar,
               },
             },
             "*"
           );
         }
+        return;
+      }
+      if (ev.data.type === "fuzz:contrato-salvar") {
+        const c = (ev.data.payload || {}).contrato;
+        if (!c || !c.id) return;
+        const atual = contratosGeradosRef.current;
+        const existente = atual.find((x) => x.id === c.id);
+        const salvo = { id: c.id, clienteId: c.clienteId || "", titulo: c.titulo || "", dados: c.dados || {}, atualizadoEm: new Date().toISOString() };
+        const lista = existente ? atual.map((x) => (x.id === c.id ? salvo : x)) : [salvo, ...atual];
+        persistContratosGerados(lista);
+        if (ev.source) ev.source.postMessage({ type: "fuzz:contratos-atualizados", payload: { contratos: lista, salvoId: c.id } }, "*");
+        setToast("Contrato salvo — dá pra reabrir e alterar em \"Contratos salvos\".");
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      if (ev.data.type === "fuzz:contrato-excluir") {
+        const id = (ev.data.payload || {}).id;
+        const lista = contratosGeradosRef.current.filter((x) => x.id !== id);
+        persistContratosGerados(lista);
+        if (ev.source) ev.source.postMessage({ type: "fuzz:contratos-atualizados", payload: { contratos: lista, salvoId: null } }, "*");
         return;
       }
       if (ev.data.type === "fuzz:anexar-cliente") {
@@ -1685,6 +1710,19 @@ export default function App() {
     setRetiradaReservaForm(null);
     setToast("Retirada de R$ " + valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) + " lançada no financeiro.");
     setTimeout(() => setToast(null), 6000);
+  }
+
+  async function persistContratosGerados(list) {
+    const prev = contratosGeradosRef.current;
+    contratosGeradosRef.current = list;
+    setContratosGerados(list);
+    try {
+      await api.syncContratosGerados(prev, list);
+    } catch (e) {
+      console.error("Falha ao salvar contratos", e);
+      setToast("Não consegui salvar o contrato: " + (e?.message || e?.error_description || JSON.stringify(e)));
+      setTimeout(() => setToast(null), 12000);
+    }
   }
 
   async function persistNotasReuniao(list) {
