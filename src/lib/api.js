@@ -183,6 +183,7 @@ function itemToRow(demandaId, it, ordem) {
     nome: it.nome || "",
     status: it.status || "Não iniciado",
     data_entrega: n(it.dataEntrega),
+    data_conclusao: n(it.dataConclusao),
     ordem,
   };
 }
@@ -205,6 +206,7 @@ function demandaFromRow(r, itensByDemanda) {
       nome: it.nome,
       status: it.status || "Não iniciado",
       dataEntrega: it.data_entrega || "",
+      dataConclusao: it.data_conclusao || "",
     })),
   };
 }

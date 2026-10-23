@@ -285,7 +285,7 @@ const emptyDemand = () => ({
   ordem: 0,
 });
 
-const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", status: VIDEO_STATUS[0], dataEntrega: "" });
+const emptyVideoItem = () => ({ id: "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), nome: "", status: VIDEO_STATUS[0], dataEntrega: "", dataConclusao: "" });
 
 const emptyClient = () => ({
   id: "c_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
@@ -328,19 +328,66 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function getUrgencia(d) {
-  if (d.status === "Finalizada") return { label: "Concluído", tone: "done" };
-  if (d.status === "Standby") return { label: "StandBy", tone: "standby" };
+function ehNaoIniciado(st) {
+  return !st || st === "Não iniciada" || st === "Não iniciado";
+}
+
+// Status que vale pra um vídeo: a demanda marcada como Finalizada/Standby/Aguardando
+// aprovação vale pra todos os vídeos que ainda não foram finalizados.
+function statusEfetivoDoItem(d, statusItem) {
+  if (statusItem === "Finalizada" || d.status === "Finalizada") return "Finalizada";
+  if (d.status === "Standby") return "Standby";
+  if (d.status === "Aguardando aprovação") return "Aguardando aprovação";
+  return statusItem || "Não iniciada";
+}
+
+// Unidades de trabalho de uma demanda: cada vídeo (ou a própria demanda, se não tiver vídeos).
+// Todos os números do painel são contados por unidade, então mudam a cada vídeo concluído.
+function unidadesDoTrabalho(d) {
   const itens = d.itens || [];
-  const todosVideosAguardandoCliente = itens.length > 0 && itens.every((v) => v.status === "Aguardando aprovação");
-  if (d.status === "Aguardando aprovação" || todosVideosAguardandoCliente) return { label: "Aguardando cliente", tone: "wait" };
-  if (!d.dataEntrega) return { label: "Sem prazo", tone: "neutral" };
+  if (itens.length === 0) {
+    return [{
+      status: d.status || "Não iniciada",
+      prazo: d.dataEntrega || "",
+      conclusao: d.status === "Finalizada" ? d.dataAprovacao || "" : "",
+    }];
+  }
+  return itens.map((it) => {
+    const status = statusEfetivoDoItem(d, it.status);
+    return {
+      status,
+      prazo: it.dataEntrega || d.dataEntrega || "",
+      conclusao: status === "Finalizada"
+        ? it.dataConclusao || (d.status === "Finalizada" ? d.dataAprovacao : "") || it.dataEntrega || d.dataEntrega || ""
+        : "",
+    };
+  });
+}
+
+function urgenciaDaUnidade(u) {
+  if (u.status === "Finalizada") return { label: "Concluído", tone: "done" };
+  if (u.status === "Standby") return { label: "StandBy", tone: "standby" };
+  if (u.status === "Aguardando aprovação") return { label: "Aguardando cliente", tone: "wait" };
+  if (!u.prazo) return { label: "Sem prazo", tone: "neutral" };
   const today = new Date(todayISO() + "T00:00:00");
-  const entrega = new Date(d.dataEntrega + "T00:00:00");
+  const entrega = new Date(u.prazo + "T00:00:00");
   const diff = Math.round((entrega - today) / 86400000);
   if (diff < 0) return { label: "Atrasado", tone: "late" };
   if (diff <= 3) return { label: "Urgente", tone: "urgent" };
   return { label: "No prazo", tone: "ok" };
+}
+
+const SEVERIDADE_URGENCIA = { late: 4, urgent: 3, ok: 2, neutral: 1 };
+
+function getUrgencia(d) {
+  const urgencias = unidadesDoTrabalho(d).map(urgenciaDaUnidade);
+  const ativas = urgencias.filter((u) => SEVERIDADE_URGENCIA[u.tone]);
+  if (ativas.length > 0) return ativas.reduce((a, b) => (SEVERIDADE_URGENCIA[b.tone] > SEVERIDADE_URGENCIA[a.tone] ? b : a));
+  const espera = urgencias.find((u) => u.tone === "wait");
+  if (espera) return espera;
+  const parada = urgencias.find((u) => u.tone === "standby");
+  if (parada) return parada;
+  return { label: "Concluído", tone: "done" };
 }
 
 const TONE_CLASS = {
@@ -2163,7 +2210,12 @@ export default function App() {
   function updateVideoField(demandId, itemId, field, value) {
     const list = demandsRef.current.map((d) => {
       if (d.id !== demandId) return d;
-      const itens = (d.itens || []).map((it) => (it.id === itemId ? { ...it, [field]: value } : it));
+      const itens = (d.itens || []).map((it) => {
+        if (it.id !== itemId) return it;
+        const novo = { ...it, [field]: value };
+        if (field === "status") novo.dataConclusao = value === "Finalizada" ? it.dataConclusao || todayISO() : "";
+        return novo;
+      });
       let atualizado = { ...d, itens };
       if (field === "status" && (value === "Aguardando aprovação" || value === "Finalizada")) {
         atualizado.dataEnvioAprovacao = atualizado.dataEnvioAprovacao || todayISO();
@@ -2659,23 +2711,31 @@ export default function App() {
   }, [relatorioDemandasDoMes, relatorioDemandaClienteFiltro, relatorioDemandaTipoFiltro]);
 
   const stats = useMemo(() => {
-    const somar = (lista) => lista.reduce((s, d) => s + demandaPeso(d), 0);
-    const emAndamento = somar(demands.filter((d) => d.status === "Em andamento"));
-    const atrasado = somar(demands.filter((d) => getUrgencia(d).tone === "late"));
-    const aguardando = somar(demands.filter((d) => getUrgencia(d).tone === "wait"));
+    let emAndamento = 0;
+    let atrasado = 0;
+    let aguardando = 0;
+    demands.forEach((d) => {
+      unidadesDoTrabalho(d).forEach((u) => {
+        if (u.status === "Finalizada" || u.status === "Standby") return;
+        if (u.status === "Aguardando aprovação") { aguardando++; return; }
+        if (urgenciaDaUnidade(u).tone === "late") atrasado++;
+        if (u.status === "Em andamento" || (ehNaoIniciado(u.status) && d.status === "Em andamento")) emAndamento++;
+      });
+    });
     return { emAndamento, atrasado, aguardando };
   }, [demands]);
 
   const demandasStatsMes = useMemo(() => {
-    const doMes = new Set();
+    let total = 0;
     let finalizadas = 0;
     demands.forEach((d) => {
-      const prazoNoMes = mesRef(d.dataEntrega) === monthAnchor;
-      const entregueNoMes = d.status === "Finalizada" && mesRef(d.dataAprovacao) === monthAnchor;
-      if (prazoNoMes || entregueNoMes) doMes.add(d);
-      if (entregueNoMes) finalizadas += demandaPeso(d);
+      unidadesDoTrabalho(d).forEach((u) => {
+        const prazoNoMes = mesRef(u.prazo) === monthAnchor;
+        const entregueNoMes = u.status === "Finalizada" && mesRef(u.conclusao) === monthAnchor;
+        if (prazoNoMes || entregueNoMes) total++;
+        if (entregueNoMes) finalizadas++;
+      });
     });
-    const total = Array.from(doMes).reduce((s, d) => s + demandaPeso(d), 0);
     return { total, finalizadas };
   }, [demands, monthAnchor]);
 
@@ -2701,22 +2761,29 @@ export default function App() {
         label: "Ver propostas",
       });
     }
-    const demandasAtrasadas = demands.filter((d) => getUrgencia(d).tone === "late");
+    const contarUnidades = (lista, teste) => lista.reduce((s, d) => s + unidadesDoTrabalho(d).filter(teste).length, 0);
+    const detalheVideos = (lista, teste) => {
+      const unidades = contarUnidades(lista, teste);
+      return unidades > lista.length ? " (" + unidades + " vídeos pendentes)" : "";
+    };
+    const unidadeAtrasada = (u) => urgenciaDaUnidade(u).tone === "late";
+    const demandasAtrasadas = demands.filter((d) => unidadesDoTrabalho(d).some(unidadeAtrasada));
     if (demandasAtrasadas.length > 0) {
       list.push({
         id: "demandas-atrasadas",
         tone: "late",
-        text: demandasAtrasadas.length === 1 ? "1 demanda está atrasada." : demandasAtrasadas.length + " demandas estão atrasadas.",
+        text: (demandasAtrasadas.length === 1 ? "1 demanda está atrasada" : demandasAtrasadas.length + " demandas estão atrasadas") + detalheVideos(demandasAtrasadas, unidadeAtrasada) + ".",
         goto: "demandas",
         label: "Ver demandas",
       });
     }
-    const demandasHoje = demands.filter((d) => d.dataEntrega === todayISO() && d.status !== "Finalizada");
+    const unidadeHoje = (u) => u.prazo === todayISO() && u.status !== "Finalizada";
+    const demandasHoje = demands.filter((d) => unidadesDoTrabalho(d).some(unidadeHoje));
     if (demandasHoje.length > 0) {
       list.push({
         id: "demandas-hoje",
         tone: "urgent",
-        text: demandasHoje.length === 1 ? "1 demanda tem entrega hoje." : demandasHoje.length + " demandas têm entrega hoje.",
+        text: (demandasHoje.length === 1 ? "1 demanda tem entrega hoje" : demandasHoje.length + " demandas têm entrega hoje") + detalheVideos(demandasHoje, unidadeHoje) + ".",
         goto: "demandas",
         label: "Ver demandas",
       });
@@ -2941,7 +3008,7 @@ export default function App() {
 
   const homeHoje = useMemo(() => {
     const hoje = todayISO();
-    const entregas = demands.filter((d) => d.dataEntrega === hoje);
+    const entregas = demands.filter((d) => unidadesDoTrabalho(d).some((u) => u.prazo === hoje));
     const pagamentos = transacoes.filter((t) => t.data === hoje);
     const kanbanHoje = kanbanTasks.filter((k) => k.data === hoje && !k.concluida);
     return { entregas, pagamentos, kanbanHoje };
@@ -3961,7 +4028,10 @@ export default function App() {
                         <div key={d.id} className="home-row" onClick={() => setDemandForm(d)}>
                           <span className={"home-row-dot tone-" + getUrgencia(d).tone} />
                           <span className="home-row-title">{d.projeto}</span>
-                          <span className="home-row-sub">{clientName(d.clienteId)}</span>
+                          <span className="home-row-sub">
+                            {clientName(d.clienteId)}
+                            {videoProgress(d) ? " · " + videoProgress(d).done + "/" + videoProgress(d).total + " vídeos" : ""}
+                          </span>
                         </div>
                       ))
                     )}
@@ -5889,7 +5959,7 @@ export default function App() {
                     value={v.status}
                     onChange={(e) => {
                       const novoValor = e.target.value;
-                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, status: novoValor } : it));
+                      const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, status: novoValor, dataConclusao: novoValor === "Finalizada" ? it.dataConclusao || todayISO() : "" } : it));
                       const enviaAprovacao = novoValor === "Aguardando aprovação" || novoValor === "Finalizada";
                       const todasFinalizadas = itens.length > 0 && itens.every((it) => it.status === "Finalizada");
                       setDemandForm({
