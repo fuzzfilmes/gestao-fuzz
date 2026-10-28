@@ -347,6 +347,8 @@ function transacaoToRow(t) {
     parcela_grupo_id: n(t.parcelaGrupoId),
     parcela_atual: t.parcelaAtual != null ? t.parcelaAtual : null,
     parcela_total: t.parcelaTotal != null ? t.parcelaTotal : null,
+    nota_emitida: !!t.notaEmitida,
+    data_nota_emitida: n(t.dataNotaEmitida),
   };
 }
 function transacaoFromRow(r) {
@@ -366,6 +368,8 @@ function transacaoFromRow(r) {
     parcelaGrupoId: r.parcela_grupo_id || "",
     parcelaAtual: r.parcela_atual,
     parcelaTotal: r.parcela_total,
+    notaEmitida: !!r.nota_emitida,
+    dataNotaEmitida: r.data_nota_emitida || "",
   };
 }
 export async function listTransacoes() {

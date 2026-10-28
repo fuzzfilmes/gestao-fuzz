@@ -248,6 +248,8 @@ const emptyTransacao = (tipo = "Receita") => ({
   parcelaGrupoId: "",
   parcelaAtual: null,
   parcelaTotal: null,
+  notaEmitida: false,
+  dataNotaEmitida: "",
 });
 
 function getStatusPagamentoEfetivo(t) {
@@ -325,7 +327,102 @@ function fmtDate(iso) {
 }
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+// ---------- Nota emitida: competência do faturamento e do imposto ----------
+// O mês em que a nota é emitida define o faturado; o imposto dele vence dia 20 do mês seguinte.
+const CATEGORIA_IMPOSTO = "Impostos e Tributos";
+const IMPOSTO_AUTO_DESDE = "2026-10";
+
+function receitaFaturada(t) {
+  return t.tipo === "Receita" && t.tipoReceita !== TIPO_RECEITA_RETIRADA_RESERVA && !!t.notaEmitida && !!t.dataNotaEmitida;
+}
+
+function faturadoDoMes(list, mes) {
+  return list
+    .filter((t) => receitaFaturada(t) && mesRef(t.dataNotaEmitida) === mes)
+    .reduce((s, t) => s + (parseFloat(t.valor) || 0), 0);
+}
+
+function vencimentoTributosDoMes(mes) {
+  return addMonthsISO(mes, 1) + "-20";
+}
+
+function ehDespesaTributoAutomatica(t) {
+  return t.tipo === "Despesa" && (t.id.startsWith("imposto_") || t.id.startsWith("inss_"));
+}
+
+// Mantém em dia as despesas automáticas: o INSS do pró-labore vence dia 20 do mês seguinte e o
+// imposto de cada mês de nota (a partir de IMPOSTO_AUTO_DESDE) é % x notas emitidas, vencendo dia 20
+// do mês seguinte. Despesas já pagas nunca são alteradas. Idempotente: sem mudança, devolve a mesma lista.
+function reconciliarAutomaticos(list, pctImposto, pctInss) {
+  let mudou = false;
+  let out = list.map((t) => {
+    if (t.tipo !== "Despesa" || !t.id.startsWith("inss_") || t.statusPagamento === "Pago") return t;
+    const data = vencimentoTributosDoMes(t.id.slice(5));
+    if (t.data === data) return t;
+    mudou = true;
+    return { ...t, data };
+  });
+  const pctI = parseFloat(pctInss) || 0;
+  out.filter((t) => t.tipo === "Despesa" && t.id.startsWith("prolabore_")).forEach((pl) => {
+    const mes = pl.id.slice(10);
+    if (mes < IMPOSTO_AUTO_DESDE) return;
+    const id = "inss_" + mes;
+    const existente = out.find((t) => t.id === id);
+    if (existente && existente.statusPagamento === "Pago") return;
+    const valor = Math.round((parseFloat(pl.valor) || 0) * pctI) / 100;
+    if (valor <= 0) {
+      if (existente) {
+        out = out.filter((t) => t.id !== id);
+        mudou = true;
+      }
+      return;
+    }
+    const dados = { descricao: "INSS " + mesLabel(mes), categoria: "INSS", natureza: "Fixa", valor: String(valor), data: vencimentoTributosDoMes(mes) };
+    if (!existente) {
+      out = [{ ...emptyTransacao("Despesa"), id, ...dados, statusPagamento: "Pendente" }, ...out];
+      mudou = true;
+    } else if (existente.data !== dados.data || Math.abs((parseFloat(existente.valor) || 0) - valor) > 0.001) {
+      out = out.map((t) => (t.id === id ? { ...t, ...dados } : t));
+      mudou = true;
+    }
+  });
+  const pct = parseFloat(pctImposto) || 0;
+  const meses = new Set(
+    out.filter(receitaFaturada).map((t) => mesRef(t.dataNotaEmitida)).filter((m) => m >= IMPOSTO_AUTO_DESDE)
+  );
+  out.filter((t) => t.tipo === "Despesa" && t.id.startsWith("imposto_")).forEach((t) => meses.add(t.id.slice(8)));
+  meses.forEach((mes) => {
+    const id = "imposto_" + mes;
+    const existente = out.find((t) => t.id === id);
+    if (existente && existente.statusPagamento === "Pago") return;
+    const valor = Math.round(faturadoDoMes(out, mes) * pct) / 100;
+    if (valor <= 0) {
+      if (existente) {
+        out = out.filter((t) => t.id !== id);
+        mudou = true;
+      }
+      return;
+    }
+    const dados = {
+      descricao: "Imposto — notas de " + mesLabel(mes),
+      categoria: CATEGORIA_IMPOSTO,
+      natureza: "Variável",
+      valor: String(valor),
+      data: vencimentoTributosDoMes(mes),
+    };
+    if (!existente) {
+      out = [{ ...emptyTransacao("Despesa"), id, ...dados, statusPagamento: "Pendente" }, ...out];
+      mudou = true;
+    } else if (existente.data !== dados.data || Math.abs((parseFloat(existente.valor) || 0) - valor) > 0.001 || existente.descricao !== dados.descricao) {
+      out = out.map((t) => (t.id === id ? { ...t, ...dados } : t));
+      mudou = true;
+    }
+  });
+  return { list: mudou ? out : list, mudou };
 }
 
 function ehNaoIniciado(st) {
@@ -596,7 +693,7 @@ function FinanceChart({ data }) {
   const barGap = 4;
   const barW = Math.min(30, (groupW - barGap * 4) / 3);
 
-  const allVals = data.flatMap((d) => [d.totalReceita, d.totalDespesas, d.meta || 0, d.margem]);
+  const allVals = data.flatMap((d) => [d.faturado, d.totalDespesas, d.meta || 0, d.margem]);
   const maxVal = Math.max(1, ...allVals);
   const minVal = Math.min(0, ...allVals);
   const range = maxVal - minVal || 1;
@@ -639,11 +736,11 @@ function FinanceChart({ data }) {
               </line>
             )}
             <rect
-              x={x1} y={Math.min(scaleY(d.totalReceita), zeroY)} width={barW}
-              height={Math.max(1, Math.abs(zeroY - scaleY(d.totalReceita)))}
+              x={x1} y={Math.min(scaleY(d.faturado), zeroY)} width={barW}
+              height={Math.max(1, Math.abs(zeroY - scaleY(d.faturado)))}
               className="chart-bar-receita" rx="2"
             >
-              <title>{"Receita " + mesLabel(d.mes) + ": R$ " + d.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
+              <title>{"Faturado " + mesLabel(d.mes) + ": R$ " + d.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</title>
             </rect>
             <rect
               x={x2} y={Math.min(scaleY(d.totalDespesas), zeroY)} width={barW}
@@ -1730,14 +1827,31 @@ export default function App() {
     setTab("contratos");
   }
 
-  async function persistTransacoes(list) {
+  async function persistTransacoes(listaOriginal) {
     const prev = transacoesRef.current;
+    const { list } = reconciliarAutomaticos(listaOriginal, parametrosFinanceirosRef.current.pctImposto, parametrosFinanceirosRef.current.pctInss);
     setTransacoes(list);
     try {
       await api.syncTransacoes(prev, list);
     } catch (e) {
       console.error("Falha ao salvar transações", e);
     }
+  }
+
+  // Ao abrir o painel: acerta INSS/imposto automáticos que já existiam e garante a categoria do imposto.
+  useEffect(() => {
+    if (loading) return;
+    const pct = parametrosFinanceirosRef.current.pctImposto;
+    if (reconciliarAutomaticos(transacoesRef.current, pct, parametrosFinanceirosRef.current.pctInss).mudou) persistTransacoes(transacoesRef.current);
+    if ((parseFloat(pct) || 0) > 0 && !tags.some((tg) => tg.nome === CATEGORIA_IMPOSTO)) createTag(CATEGORIA_IMPOSTO, "#D9A441");
+  }, [loading]);
+
+  function toggleNotaEmitida(t) {
+    persistTransacoes(
+      transacoesRef.current.map((x) =>
+        x.id !== t.id ? x : x.notaEmitida ? { ...x, notaEmitida: false, dataNotaEmitida: "" } : { ...x, notaEmitida: true, dataNotaEmitida: todayISO() }
+      )
+    );
   }
 
   function retirarDaReserva() {
@@ -1818,6 +1932,8 @@ export default function App() {
           parcelaGrupoId: grupoId,
           parcelaAtual: i + 1,
           parcelaTotal: parcelas,
+          notaEmitida: false,
+          dataNotaEmitida: "",
         });
       }
       persistTransacoes([...novas, ...transacoes]);
@@ -1892,6 +2008,7 @@ export default function App() {
     const merged = { ...parametrosFinanceirosRef.current, ...partial };
     parametrosFinanceirosRef.current = merged;
     setParametrosFinanceiros(merged);
+    if ("pctImposto" in partial || "pctInss" in partial) persistTransacoes(transacoesRef.current);
     try {
       await api.setParametrosFinanceiros(merged);
     } catch (e) {
@@ -1948,7 +2065,7 @@ export default function App() {
         categoria: "INSS",
         natureza: "Fixa",
         valor: String(valorInss),
-        data: mes + "-05",
+        data: vencimentoTributosDoMes(mes),
         statusPagamento: existenteInss ? existenteInss.statusPagamento : "Pendente",
       };
       list = existenteInss
@@ -2831,11 +2948,13 @@ export default function App() {
     const totalDespesas = despesas.reduce((s, t) => s + num(t.valor), 0);
     const despesasFixas = despesas.filter((t) => t.natureza === "Fixa").reduce((s, t) => s + num(t.valor), 0);
     const despesasVariaveis = totalDespesas - despesasFixas;
-    const proLaboreValor = despesas.filter((t) => t.categoria === "Pró Labore").reduce((s, t) => s + num(t.valor), 0);
-    const inssValor = despesas.filter((t) => t.categoria === "INSS").reduce((s, t) => s + num(t.valor), 0);
-    const margem = totalReceita - totalDespesas;
-    const margemPct = totalReceita > 0 ? (margem / totalReceita) * 100 : 0;
-    return { mes, totalReceita, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasFixas, despesasVariaveis, proLaboreValor, inssValor, margem, margemPct };
+    const proLaboreValor = despesas.filter((t) => t.id.startsWith("prolabore_") || t.categoria === "Pró Labore").reduce((s, t) => s + num(t.valor), 0);
+    const faturado = faturadoDoMes(list, mes);
+    const despesasTributosAuto = despesas.filter(ehDespesaTributoAutomatica).reduce((s, t) => s + num(t.valor), 0);
+    const despesasOperacionais = totalDespesas - despesasTributosAuto;
+    const margem = faturado - totalDespesas;
+    const margemPct = faturado > 0 ? (margem / faturado) * 100 : 0;
+    return { mes, totalReceita, faturado, recebido, aReceber: totalReceita - recebido, totalDespesas, despesasOperacionais, despesasFixas, despesasVariaveis, proLaboreValor, margem, margemPct };
   }
 
   const financeStats = useMemo(() => {
@@ -2866,7 +2985,7 @@ export default function App() {
   const faturamentoAnual = useMemo(() => {
     const num = (v) => parseFloat(v) || 0;
     return transacoes
-      .filter((t) => t.tipo === "Receita" && t.data && t.data.slice(0, 4) === anoAtual)
+      .filter((t) => receitaFaturada(t) && t.dataNotaEmitida.slice(0, 4) === anoAtual)
       .reduce((s, t) => s + num(t.valor), 0);
   }, [transacoes, anoAtual]);
 
@@ -2882,8 +3001,8 @@ export default function App() {
       key: "meta-financeira",
       label: metaFin > 0 ? "da meta financeira do mês" : "faturado no mês",
       display: metaFin > 0
-        ? Math.round((financeStatsMes.totalReceita / metaFin) * 100) + "%"
-        : (hideValues ? "R$ ••••" : "R$ " + financeStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 0 })),
+        ? Math.round((financeStatsMes.faturado / metaFin) * 100) + "%"
+        : (hideValues ? "R$ ••••" : "R$ " + financeStatsMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 0 })),
     });
     const metaNovos = parseFloat(metasClientesNovos[monthAnchor]) || 0;
     items.push({
@@ -3121,27 +3240,29 @@ export default function App() {
   }
 
   function computeSaudeFinanceira(statsMes, saldoAcum, ultimosMesesArr) {
-    const faturado = statsMes.totalReceita;
-    const despesasOperacionais = statsMes.totalDespesas;
+    const faturado = statsMes.faturado;
+    const despesasOperacionais = statsMes.despesasOperacionais;
     const impostoValor = (faturado * (parseFloat(parametrosFinanceiros.pctImposto) || 0)) / 100;
     const reservaValor = (faturado * (parseFloat(parametrosFinanceiros.pctReserva) || 0)) / 100;
-    const sobraLivre = faturado - despesasOperacionais - impostoValor;
+    const inssDoMes = transacoes.find((t) => t.id === "inss_" + statsMes.mes);
+    const inssValor = inssDoMes ? parseFloat(inssDoMes.valor) || 0 : 0;
+    const vencimentoTributos = vencimentoTributosDoMes(statsMes.mes);
+    const sobraLivre = faturado - despesasOperacionais - impostoValor - inssValor;
     const mediaDespesas = ultimosMesesArr.reduce((s, m) => s + m.totalDespesas, 0) / (ultimosMesesArr.length || 1);
     const custoMensalTotal = mediaDespesas;
     const mesesGarantidos = custoMensalTotal > 0 ? saldoAcum / custoMensalTotal : null;
     const reservaIdealValor = custoMensalTotal * MESES_RESERVA_IDEAL;
     const pctDaReservaIdeal = reservaIdealValor > 0 ? (saldoAcum / reservaIdealValor) * 100 : null;
-    const inssValor = statsMes.inssValor;
     const fatorRMinimo = faturado * 0.28;
-    return { faturado, despesasOperacionais, impostoValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal, inssValor, fatorRMinimo };
+    return { faturado, despesasOperacionais, impostoValor, reservaValor, sobraLivre, mediaDespesas, custoMensalTotal, mesesGarantidos, reservaIdealValor, pctDaReservaIdeal, inssValor, vencimentoTributos, fatorRMinimo };
   }
   const saudeFinanceiraMes = useMemo(
     () => computeSaudeFinanceira(financeStatsMes, saldoAcumulado, ultimosMeses),
-    [financeStatsMes, parametrosFinanceiros, ultimosMeses, saldoAcumulado]
+    [financeStatsMes, parametrosFinanceiros, ultimosMeses, saldoAcumulado, transacoes]
   );
   const relatorioSaudeFinanceira = useMemo(
     () => computeSaudeFinanceira(relatorioStatsMes, relatorioSaldoAcumulado, ultimosMesesRelatorio),
-    [relatorioStatsMes, parametrosFinanceiros, ultimosMesesRelatorio, relatorioSaldoAcumulado]
+    [relatorioStatsMes, parametrosFinanceiros, ultimosMesesRelatorio, relatorioSaldoAcumulado, transacoes]
   );
 
   return (
@@ -4560,7 +4681,7 @@ export default function App() {
                 {(parseFloat(metas[monthAnchor]) || 0) > 0 && (
                   <div className="finance-gauge-card">
                     <GoalGauge
-                      pct={(financeStatsMes.totalReceita / (parseFloat(metas[monthAnchor]) || 1)) * 100}
+                      pct={(financeStatsMes.faturado / (parseFloat(metas[monthAnchor]) || 1)) * 100}
                       size={104}
                       label={"Meta de " + mesLabel(monthAnchor)}
                     />
@@ -4636,6 +4757,7 @@ export default function App() {
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "cliente")}>Cliente / Demanda {financeReceitasSortKey === "cliente" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "valor")}>Valor {financeReceitasSortKey === "valor" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "vencimento")}>Vencimento {financeReceitasSortKey === "vencimento" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
+                        <th title="Nota emitida — o mês em que é marcada define o faturamento e o imposto">Nota</th>
                         <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "status")}>Status {financeReceitasSortKey === "status" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
                         <th></th>
                       </tr>
@@ -4658,6 +4780,19 @@ export default function App() {
                             <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
                             <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                             <td className="mono">{fmtDate(t.data)}</td>
+                            <td>
+                              {t.tipoReceita === TIPO_RECEITA_RETIRADA_RESERVA ? (
+                                "—"
+                              ) : (
+                                <label
+                                  style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11.5 }}
+                                  title={t.notaEmitida ? "Nota emitida em " + fmtDate(t.dataNotaEmitida) + " — clique pra desmarcar" : "Marcar nota como emitida hoje"}
+                                >
+                                  <input type="checkbox" checked={!!t.notaEmitida} onChange={() => toggleNotaEmitida(t)} />
+                                  {t.notaEmitida && <span className="mono">{fmtDate(t.dataNotaEmitida).slice(0, 5)}</span>}
+                                </label>
+                              )}
+                            </td>
                             <td>
                               <button
                                 className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
@@ -4810,8 +4945,8 @@ export default function App() {
                 <div className="metas-grid">
                   <div className="metas-card">
                     <h4>Distribuição do faturamento</h4>
-                    <div className="metas-line"><span>Faturado</span><b>R$ {saudeFinanceiraMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {saudeFinanceiraMes.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Faturado (notas emitidas)</span><b>R$ {saudeFinanceiraMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}% · vence {fmtDate(saudeFinanceiraMes.vencimentoTributos)})</span><b>- R$ {saudeFinanceiraMes.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Despesas</span><b>- R$ {saudeFinanceiraMes.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line">
                       <span>Reserva (sugestão: R$ {saudeFinanceiraMes.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 0 })})</span>
@@ -4819,7 +4954,7 @@ export default function App() {
                         R$ {reservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </b>
                     </div>
-                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore)</span><b>R$ {saudeFinanceiraMes.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore · vence {fmtDate(saudeFinanceiraMes.vencimentoTributos)})</span><b>- R$ {saudeFinanceiraMes.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span style={{ color: "var(--text-dim)" }}>Fator R — mínimo sugerido (28% do faturado)</span><b style={{ color: "var(--text-dim)" }}>R$ {saudeFinanceiraMes.fatorRMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
@@ -4874,7 +5009,7 @@ export default function App() {
 
               {(() => {
                 const metaValor = parseFloat(metas[monthAnchor]) || 0;
-                const faturado = financeStatsMes.totalReceita;
+                const faturado = financeStatsMes.faturado;
                 const pct = metaValor > 0 ? Math.min(999, (faturado / metaValor) * 100) : 0;
                 const falta = Math.max(0, metaValor - faturado);
                 const confirmadas = proposals.filter((p) => p.status === "Confirmada" && p.valorTotal > 0);
@@ -5096,14 +5231,14 @@ export default function App() {
 
               <ReportSection
                 title="Financeiro"
-                subtitle={"R$ " + relatorioStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 0 }) + " faturado · margem de R$ " + relatorioStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}
+                subtitle={"R$ " + relatorioStatsMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 0 }) + " faturado · margem de R$ " + relatorioStatsMes.margem.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}
                 defaultOpen
               >
                 <div className="metas-grid">
                   <div className="metas-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                     {(() => {
                       const metaValor = parseFloat(metas[relatorioMes]) || 0;
-                      const faturado = relatorioStatsMes.totalReceita;
+                      const faturado = relatorioStatsMes.faturado;
                       const pct = metaValor > 0 ? (faturado / metaValor) * 100 : 0;
                       return metaValor > 0 ? (
                         <>
@@ -5121,7 +5256,7 @@ export default function App() {
                   </div>
                   <div className="metas-card">
                     <h4>Margem de lucro — {mesLabel(relatorioMes)}</h4>
-                    <div className="metas-line"><span>Entradas</span><b>R$ {relatorioStatsMes.totalReceita.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Faturado (notas emitidas)</span><b>R$ {relatorioStatsMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Despesas</span><b>R$ {relatorioStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
                     {relatorioStatsMes.proLaboreValor > 0 && (
                       <div className="metas-line"><span>Pró-labore</span><b>R$ {relatorioStatsMes.proLaboreValor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</b></div>
@@ -5154,8 +5289,8 @@ export default function App() {
                 <div className="metas-grid">
                   <div className="metas-card">
                     <h4>Distribuição do faturamento</h4>
-                    <div className="metas-line"><span>Faturado</span><b>R$ {relatorioSaudeFinanceira.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}%)</span><b>- R$ {relatorioSaudeFinanceira.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Faturado (notas emitidas)</span><b>R$ {relatorioSaudeFinanceira.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}% · vence {fmtDate(relatorioSaudeFinanceira.vencimentoTributos)})</span><b>- R$ {relatorioSaudeFinanceira.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span>Despesas</span><b>- R$ {relatorioSaudeFinanceira.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line">
                       <span>Reserva (sugestão: R$ {relatorioSaudeFinanceira.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 0 })})</span>
@@ -5163,7 +5298,7 @@ export default function App() {
                         R$ {relatorioReservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </b>
                     </div>
-                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore)</span><b>R$ {relatorioSaudeFinanceira.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore · vence {fmtDate(relatorioSaudeFinanceira.vencimentoTributos)})</span><b>- R$ {relatorioSaudeFinanceira.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line"><span style={{ color: "var(--text-dim)" }}>Fator R — mínimo sugerido (28% do faturado)</span><b style={{ color: "var(--text-dim)" }}>R$ {relatorioSaudeFinanceira.fatorRMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
                     <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
                       <span>Sobra livre</span>
@@ -5431,8 +5566,8 @@ export default function App() {
                   <div className="metas-card">
                     <h4>Fator R — {mesLabel(monthAnchor)}</h4>
                     <div className="metas-line">
-                      <span>28% do faturado nesse mês</span>
-                      <b>R$ {(financeStatsMes.totalReceita * 0.28).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                      <span>28% do faturado (notas emitidas) nesse mês</span>
+                      <b>R$ {(financeStatsMes.faturado * 0.28).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
                     </div>
                     <p className="config-hint" style={{ marginTop: 8 }}>
                       Referência: nos CNAEs que emitem NF, o pró-labore precisa ser igual ou maior que 28% do faturamento pra manter a alíquota de imposto melhor. Não altera o valor do pró-labore acima — é só pra consulta (cálculo provisório, a contabilidade vai ajustar o método em breve).
@@ -6341,6 +6476,36 @@ export default function App() {
                     <option key={tr} value={tr}>{tr}</option>
                   ))}
                 </select>
+              </div>
+            )}
+            {transacaoForm.tipo === "Receita" && transacaoForm.tipoReceita !== TIPO_RECEITA_RETIRADA_RESERVA && (
+              <div className="field">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!!transacaoForm.notaEmitida}
+                    onChange={(e) =>
+                      setTransacaoForm({
+                        ...transacaoForm,
+                        notaEmitida: e.target.checked,
+                        dataNotaEmitida: e.target.checked ? transacaoForm.dataNotaEmitida || todayISO() : "",
+                      })
+                    }
+                  />
+                  Nota emitida
+                </label>
+                {transacaoForm.notaEmitida && (
+                  <>
+                    <label>Nota emitida em</label>
+                    <input type="date" value={transacaoForm.dataNotaEmitida} onChange={(e) => setTransacaoForm({ ...transacaoForm, dataNotaEmitida: e.target.value })} />
+                    {transacaoForm.dataNotaEmitida && (
+                      <div className="lock-note">
+                        <Archive size={12} />
+                        Entra no faturamento de {mesLabel(mesRef(transacaoForm.dataNotaEmitida))}; o imposto vence em {fmtDate(vencimentoTributosDoMes(mesRef(transacaoForm.dataNotaEmitida)))}.
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
             <div className="field">
