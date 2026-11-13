@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank, MessageCircle, NotebookText } from "lucide-react";
+import { calcularPainelFinanceiro, ehProLabore, proLaboreTotalDoMes, CATEGORIA_SEM } from "./lib/financeiro.js";
+import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank, MessageCircle, NotebookText, MoreHorizontal } from "lucide-react";
 import { PROPOSTA_HTML, CALCULADORA_HTML, CONTRATO_HTML } from "./embeddedTools.js";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
@@ -367,13 +368,13 @@ function reconciliarAutomaticos(list, pctImposto, pctInss) {
     return { ...t, data };
   });
   const pctI = parseFloat(pctInss) || 0;
-  out.filter((t) => t.tipo === "Despesa" && t.id.startsWith("prolabore_")).forEach((pl) => {
-    const mes = pl.id.slice(10);
-    if (mes < IMPOSTO_AUTO_DESDE) return;
+  // A base do INSS é a soma de TODOS os pró-labores que vencem no mês (fixos ou variáveis).
+  const mesesProLabore = new Set(out.filter(ehProLabore).map((t) => mesRef(t.data)).filter((m) => m >= IMPOSTO_AUTO_DESDE));
+  mesesProLabore.forEach((mes) => {
     const id = "inss_" + mes;
     const existente = out.find((t) => t.id === id);
     if (existente && existente.statusPagamento === "Pago") return;
-    const valor = Math.round((parseFloat(pl.valor) || 0) * pctI) / 100;
+    const valor = Math.round(proLaboreTotalDoMes(out, mes) * pctI) / 100;
     if (valor <= 0) {
       if (existente) {
         out = out.filter((t) => t.id !== id);
@@ -611,6 +612,7 @@ function StatsCarousel({ panels }) {
 
 const DAY_LABELS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 const DAY_LABELS_SHORT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const MESES_LONGOS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MONTH_LABELS_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
 function sundayOfWeek(iso) {
@@ -1398,14 +1400,10 @@ export default function App() {
   const [relatorioEntregasAberto, setRelatorioEntregasAberto] = useState(false);
   const [relatorioDemandaClienteFiltro, setRelatorioDemandaClienteFiltro] = useState("");
   const [relatorioDemandaTipoFiltro, setRelatorioDemandaTipoFiltro] = useState("");
-  const [financeStatusReceitaFilter, setFinanceStatusReceitaFilter] = useState("todos");
-  const [financeStatusDespesaFilter, setFinanceStatusDespesaFilter] = useState("todos");
-  const [financeCategoriaDespesaFilter, setFinanceCategoriaDespesaFilter] = useState("");
   const [financeClienteFilter, setFinanceClienteFilter] = useState("");
-  const [financeReceitasSortKey, setFinanceReceitasSortKey] = useState(null);
-  const [financeReceitasSortDir, setFinanceReceitasSortDir] = useState("asc");
-  const [financeDespesasSortKey, setFinanceDespesasSortKey] = useState(null);
-  const [financeDespesasSortDir, setFinanceDespesasSortDir] = useState("asc");
+  const [despesasPagasOcultas, setDespesasPagasOcultas] = useState(() => {
+    try { return localStorage.getItem("fin_despesas_pagas_ocultas") === "1"; } catch { return false; }
+  });
   const [monthAnchor, setMonthAnchor] = useState(mesRef(todayISO()));
   const [parcelasInput, setParcelasInput] = useState(1);
   const [repeticaoFreq, setRepeticaoFreq] = useState("mensal");
@@ -1414,7 +1412,6 @@ export default function App() {
   const [metasClientesNovos, setMetasClientesNovos] = useState({});
   const [tags, setTags] = useState([]);
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
-  const [categoriaSearch, setCategoriaSearch] = useState("");
   const [metaInputValue, setMetaInputValue] = useState("");
   const [metaAnualInputValue, setMetaAnualInputValue] = useState("");
   const [metaClientesInputValue, setMetaClientesInputValue] = useState("");
@@ -3138,67 +3135,14 @@ export default function App() {
     [kanbanTasks]
   );
 
-  const filteredTransacoesBase = useMemo(() => {
-    let list = transacoes.filter((t) => mesRef(t.data) === monthAnchor || !t.data);
-    if (financeClienteFilter) list = list.filter((t) => t.clienteId === financeClienteFilter);
-    return list;
-  }, [transacoes, monthAnchor, financeClienteFilter]);
-
-  function aplicarFiltroStatus(list, statusFiltro) {
-    if (statusFiltro === "atrasadas") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Atrasado");
-    if (statusFiltro === "pagas") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Pago");
-    if (statusFiltro === "pendentes") return list.filter((t) => getStatusPagamentoEfetivo(t) === "Pendente");
-    return list;
-  }
-
-  function getFinanceSortValue(t, key) {
-    switch (key) {
-      case "descricao": return t.descricao || "";
-      case "categoria": return t.categoria || "";
-      case "tipoReceita": return t.tipoReceita || "";
-      case "natureza": return t.natureza || "Variável";
-      case "cliente": {
-        const d = demands.find((x) => x.id === t.demandaId);
-        return clientName(t.clienteId) + (d ? " " + d.projeto : "");
-      }
-      case "valor": return parseFloat(t.valor) || 0;
-      case "vencimento": return t.data || "";
-      case "status": return getStatusPagamentoEfetivo(t);
-      default: return "";
-    }
-  }
-
-  function ordenarTransacoes(list, sortKey, sortDir) {
-    if (!sortKey) return list;
-    const dir = sortDir === "asc" ? 1 : -1;
-    return [...list].sort((a, b) => {
-      const va = getFinanceSortValue(a, sortKey);
-      const vb = getFinanceSortValue(b, sortKey);
-      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * dir;
-    });
-  }
-
-  function toggleFinanceSort(painel, key) {
-    const sortKey = painel === "receitas" ? financeReceitasSortKey : financeDespesasSortKey;
-    const sortDir = painel === "receitas" ? financeReceitasSortDir : financeDespesasSortDir;
-    const setKey = painel === "receitas" ? setFinanceReceitasSortKey : setFinanceDespesasSortKey;
-    const setDir = painel === "receitas" ? setFinanceReceitasSortDir : setFinanceDespesasSortDir;
-    if (sortKey !== key) { setKey(key); setDir("asc"); }
-    else if (sortDir === "asc") { setDir("desc"); }
-    else { setKey(null); }
-  }
-
-  const filteredReceitas = useMemo(
-    () => ordenarTransacoes(aplicarFiltroStatus(filteredTransacoesBase.filter((t) => t.tipo === "Receita"), financeStatusReceitaFilter), financeReceitasSortKey, financeReceitasSortDir),
-    [filteredTransacoesBase, financeStatusReceitaFilter, financeReceitasSortKey, financeReceitasSortDir, demands, clients]
-  );
-  const filteredDespesas = useMemo(() => {
-    let list = filteredTransacoesBase.filter((t) => t.tipo === "Despesa");
-    if (financeCategoriaDespesaFilter) list = list.filter((t) => t.categoria === financeCategoriaDespesaFilter);
-    list = aplicarFiltroStatus(list, financeStatusDespesaFilter);
-    return ordenarTransacoes(list, financeDespesasSortKey, financeDespesasSortDir);
-  }, [filteredTransacoesBase, financeStatusDespesaFilter, financeCategoriaDespesaFilter, financeDespesasSortKey, financeDespesasSortDir, demands, clients]);
+  // Lançamentos do mês (tudo que vence no mês), ordenados como na tela Financeiro:
+  // receitas: atrasadas → a receber → recebidas; despesas: a pagar (atrasadas primeiro) e pagas.
+  const ordemPorStatus = (t) => {
+    const st = getStatusPagamentoEfetivo(t);
+    return st === "Atrasado" ? 0 : st === "Pendente" ? 1 : 2;
+  };
+  const ordenarLancamentos = (list) =>
+    [...list].sort((a, b) => ordemPorStatus(a) - ordemPorStatus(b) || (a.data || "").localeCompare(b.data || "") || (a.descricao || "").localeCompare(b.descricao || "", "pt-BR"));
 
   function computeSaldoAcumulado(ateMes) {
     const num = (v) => parseFloat(v) || 0;
@@ -3260,6 +3204,32 @@ export default function App() {
     () => computeSaudeFinanceira(financeStatsMes, saldoAcumulado, ultimosMeses),
     [financeStatsMes, parametrosFinanceiros, ultimosMeses, saldoAcumulado, transacoes]
   );
+  const hojeISO = todayISO();
+  const painelFin = useMemo(
+    () =>
+      calcularPainelFinanceiro({
+        transacoes,
+        mes: monthAnchor,
+        hoje: hojeISO,
+        caixaHoje: saldoAcumulado,
+        faturadoNotas: financeStatsMes.faturado,
+        mediaDespesas6m: saudeFinanceiraMes.mediaDespesas,
+        pctImposto: parametrosFinanceiros.pctImposto,
+        pctInss: parametrosFinanceiros.pctInss,
+        pctReserva: parametrosFinanceiros.pctReserva,
+        reservaDoMes,
+      }),
+    [transacoes, monthAnchor, hojeISO, saldoAcumulado, financeStatsMes, saudeFinanceiraMes, parametrosFinanceiros, reservaDoMes]
+  );
+  const finReceitasLista = useMemo(() => {
+    const l = painelFin.receitas.filter((t) => !financeClienteFilter || t.clienteId === financeClienteFilter);
+    return ordenarLancamentos(l);
+  }, [painelFin, financeClienteFilter]);
+  const finDespesasLista = useMemo(() => {
+    const l = painelFin.despesas.filter((t) => !financeClienteFilter || t.clienteId === financeClienteFilter);
+    return ordenarLancamentos(l);
+  }, [painelFin, financeClienteFilter]);
+
   const relatorioSaudeFinanceira = useMemo(
     () => computeSaudeFinanceira(relatorioStatsMes, relatorioSaldoAcumulado, ultimosMesesRelatorio),
     [relatorioStatsMes, parametrosFinanceiros, ultimosMesesRelatorio, relatorioSaldoAcumulado, transacoes]
@@ -3587,6 +3557,130 @@ export default function App() {
         .finance-saldo-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }
         .finance-saldo-valor { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: var(--teal); }
         .finance-saldo-valor.negativo { color: var(--red); }
+
+        /* ---- Aba Financeiro (redesign) ---- */
+        .fz-fin { container-type: inline-size; --fz-in: #5ccba8; --fz-in-bg: #1d3a31; --fz-in-fg: #7fdcbe; --fz-out: #ff8a80; --fz-out-bg: #45252a; --fz-out-fg: #ff9c93; --fz-wait-bg: #3d3220; --fz-wait-fg: #f1c772; --fz-blue: #7aa7f0; --fz-line: rgba(255,255,255,0.07); display: flex; flex-direction: column; gap: 18px; }
+        .fz-fin .num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+        .fz-fin .in { color: var(--fz-in); }
+        .fz-fin .out { color: var(--fz-out); }
+        .fz-fin .late { color: var(--fz-out); }
+        .fz-fin .muted { color: var(--text-dim); }
+        .fz-fin .r { text-align: right; }
+        .fz-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .fz-eyebrow { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 6px; }
+        .fz-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .fz-title { font-family: 'Bebas Neue', sans-serif; font-size: 38px; letter-spacing: 0.6px; font-weight: 400; margin: 0; line-height: 1; }
+        .fz-head-actions { display: flex; align-items: center; gap: 10px; }
+        .fz-btn { min-height: 44px; padding: 0 18px; border-radius: 10px; background: transparent; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background 0.15s; }
+        .fz-btn-in { border: 1.5px solid var(--fz-in); color: var(--fz-in); }
+        .fz-btn-in:hover { background: rgba(92,203,168,0.12); }
+        .fz-btn-out { border: 1.5px solid var(--fz-out); color: var(--fz-out); }
+        .fz-btn-out:hover { background: rgba(255,138,128,0.12); }
+        .fz-minus { font-size: 17px; line-height: 1; width: 15px; text-align: center; }
+        .fz-card { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 22px; min-width: 0; }
+        .fz-card-title { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 0.5px; margin: 0 0 14px 0; }
+        .fz-card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .fz-total { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .fz-hero { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1.25fr); align-items: stretch; gap: 8px; }
+        .fz-op { align-self: center; font-size: 20px; width: 14px; text-align: center; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+        .fz-hero-card { display: flex; flex-direction: column; gap: 6px; padding: 18px; }
+        .fz-hero-main { background: #1e2a27; border-color: #2f5a4c; }
+        .fz-hero-main.neg { background: #2b1a1c; border-color: #6b2f33; }
+        .fz-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); }
+        .fz-label.in { color: var(--fz-in); }
+        .fz-label.out { color: var(--fz-out); }
+        .fz-big { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; line-height: 1.15; white-space: nowrap; }
+        .fz-big.neg { color: var(--fz-out); }
+        .fz-hint { font-size: 12.5px; color: var(--text-dim); line-height: 1.4; }
+        .fz-hint b { font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+        .fz-hint.warn { color: var(--fz-wait-fg); }
+        .fz-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+        .fz-bar.big { height: 8px; margin: 10px 0 8px; }
+        .fz-bar i { display: block; height: 100%; border-radius: 999px; background: var(--text-dim); }
+        .fz-bar i.in { background: var(--fz-in); }
+        .fz-bar i.out { background: var(--fz-out); }
+        .fz-bar i.amber { background: var(--amber); }
+        .fz-row-2 { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,1fr); gap: 18px; align-items: stretch; }
+        .fz-row-2.even { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+        .fz-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+        .fz-col > .fz-card:last-child { flex: 1; }
+        .fz-alert-box { background: #2b2519; border: 1px solid #4a3d22; color: #f3dda8; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; margin-bottom: 14px; }
+        .fz-alert-box.red { background: #2b1a1c; border-color: #6b2f33; color: #ffc4be; }
+        .fz-trow { display: grid; grid-template-columns: 54px 1fr 112px 124px; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--fz-line); font-size: 13.5px; }
+        .fz-trow .num { font-size: 13px; }
+        .fz-thead { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); padding-top: 0; }
+        .fz-tfoot { font-weight: 700; border-bottom: none; border-top: 1px solid rgba(255,255,255,0.14); }
+        .fz-trow-desc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+        .fz-trow .bal { color: var(--text); }
+        .fz-trow .bal.neg { color: var(--fz-out); }
+        .fz-chip { border: none; font-family: inherit; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+        .fz-chip.ok { background: var(--fz-in-bg); color: var(--fz-in-fg); }
+        .fz-chip.wait { background: var(--fz-wait-bg); color: var(--fz-wait-fg); }
+        .fz-chip.late { background: var(--fz-out-bg); color: var(--fz-out-fg); }
+        .fz-chip-sm { font-size: 10.5px; padding: 2px 8px; cursor: default; }
+        .fz-alerts { display: flex; flex-direction: column; }
+        .fz-alert { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--fz-line); }
+        .fz-alert:last-child { border-bottom: none; padding-bottom: 0; }
+        .fz-alert:first-child { padding-top: 0; }
+        .fz-alert-body { flex: 1; min-width: 0; }
+        .fz-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--fz-out); }
+        .fz-dot.pendencia { background: var(--amber); }
+        .fz-dot.sugestao { background: var(--fz-blue); }
+        .fz-alert-btn { background: transparent; border: 1px solid rgba(255,255,255,0.18); color: var(--text); border-radius: 8px; padding: 6px 12px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+        .fz-alert-btn:hover { background: rgba(255,255,255,0.07); }
+        .fz-ttl { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+        .fz-sub { margin: 2px 0 0; font-size: 12.5px; color: var(--text-dim); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .fz-sem-cat { color: var(--fz-wait-fg); }
+        .fz-ok-state { color: var(--fz-in); font-weight: 600; font-size: 14px; }
+        .fz-folego-txt { margin: 0; font-size: 14px; }
+        .fz-folego-txt b { font-family: 'JetBrains Mono', monospace; font-size: 17px; }
+        .fz-list { display: flex; flex-direction: column; }
+        .fz-lrow { position: relative; display: grid; grid-template-columns: 44px minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--fz-line); }
+        .fz-lrow.is-dim .fz-ttl, .fz-lrow.is-dim .fz-lvalor, .fz-lrow.is-dim .fz-date b { opacity: 0.55; }
+        .fz-date { display: flex; flex-direction: column; align-items: center; line-height: 1.05; }
+        .fz-date b { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 700; }
+        .fz-date span { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+        .fz-date.late b { color: var(--fz-out); }
+        .fz-lmain { min-width: 0; }
+        .fz-parcela { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--text-dim); }
+        .fz-lvalor { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; text-align: right; white-space: nowrap; }
+        .fz-lactions { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: #2a2c31; box-shadow: 0 2px 10px rgba(0,0,0,0.45); opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+        .fz-lrow:hover .fz-lactions, .fz-lrow:focus-within .fz-lactions { opacity: 1; pointer-events: auto; }
+        .fz-lactions .icon-btn { width: 26px; height: 26px; }
+        .fz-nf { border: none; font-family: inherit; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; cursor: pointer; }
+        .fz-nf.ok { background: rgba(255,255,255,0.08); color: var(--text-dim); }
+        .fz-nf.sem { background: var(--fz-wait-bg); color: var(--fz-wait-fg); }
+        .fz-group-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin: 14px 0 2px; }
+        .fz-group-head:first-of-type { margin-top: 0; }
+        .fz-link-btn { background: none; border: none; color: var(--fz-blue); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; text-transform: none; letter-spacing: 0; }
+        .fz-cats { display: flex; flex-direction: column; gap: 14px; }
+        .fz-cat-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; font-size: 13.5px; }
+        .fz-cat-nome.sem { color: var(--fz-wait-fg); }
+        .fz-cat-val { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .fz-prov { display: flex; flex-direction: column; }
+        .fz-prov-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--fz-line); }
+        .fz-prov-line.total { border-bottom: none; padding-bottom: 14px; }
+        .fz-prov-line b.num { font-size: 15px; font-weight: 700; }
+        .fz-seal { border-radius: 10px; padding: 10px 12px; font-size: 13px; font-weight: 600; line-height: 1.4; }
+        .fz-seal.ok { background: var(--fz-in-bg); color: var(--fz-in-fg); }
+        .fz-seal.bad { background: var(--fz-out-bg); color: var(--fz-out-fg); }
+        @media (hover: none) { .fz-lrow { grid-template-columns: 44px minmax(0,1fr) auto auto auto; } .fz-lactions { position: static; transform: none; background: none; box-shadow: none; padding: 0; opacity: 1; pointer-events: auto; } }
+        @container (max-width: 860px) {
+          .fz-hero { grid-template-columns: 1fr 1fr; }
+          .fz-op { display: none; }
+          .fz-row-2, .fz-row-2.even { grid-template-columns: 1fr; }
+        }
+        @container (max-width: 560px) {
+          .fz-hero { grid-template-columns: 1fr; }
+          .fz-title { font-size: 32px; }
+          .fz-head-actions { width: 100%; }
+          .fz-head-actions .fz-btn { flex: 1; justify-content: center; }
+          .fz-trow { grid-template-columns: 48px 1fr 104px; }
+          .fz-col-saldo { display: none; }
+          .fz-lrow { grid-template-columns: 40px minmax(0,1fr) auto; }
+          @media (hover: none) { .fz-lrow { grid-template-columns: 40px minmax(0,1fr) auto auto; } }
+          .fz-lrow .fz-chip { display: none; }
+        }
         .config-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 16px 0; }
         .config-tipo-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
         .config-tipo-item { display: flex; align-items: center; justify-content: space-between; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
@@ -4644,360 +4738,432 @@ export default function App() {
               )}
             </>
           ) : tab === "financeiro" ? (
-            <>
-              <div className="month-nav">
-                <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, -1))}><ChevronLeft size={14} /></button>
-                <div className="month-nav-label">{mesLabel(monthAnchor)}</div>
-                <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, 1))}><ChevronRight size={14} /></button>
-                <button className="btn-ghost kanban-today-btn" onClick={() => setMonthAnchor(mesRef(todayISO()))}>Mês atual</button>
-              </div>
-              <div className="finance-saldo-card">
-                <div>
-                  <div className="finance-saldo-label">Saldo acumulado até {mesLabel(monthAnchor)}</div>
-                </div>
-                <div className={"finance-saldo-valor" + (saldoAcumulado < 0 ? " negativo" : "")}>
-                  R$ {saldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-              <div className="finance-top-grid">
-                <div className="finance-cards">
-                  <div className="stat ready">
-                    <div className="stat-icon-sq teal"><Wallet size={16} /></div>
-                    <div className="n">R$ {financeStatsMes.recebido.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">recebido no mês</div>
-                  </div>
-                  <div className="stat wait">
-                    <div className="stat-icon-sq amber"><Clock size={16} /></div>
-                    <div className="n">R$ {financeStatsMes.aReceber.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">a receber no mês</div>
-                  </div>
-                  <div className="stat warn">
-                    <div className="stat-icon-sq red"><CreditCard size={16} /></div>
-                    <div className="n">R$ {financeStatsMes.totalDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">despesas do mês</div>
-                  </div>
-                  <div className="stat">
-                    <div className="stat-icon-sq brand"><PiggyBank size={16} /></div>
-                    <div className="n">R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div><div className="l">reserva da empresa</div>
-                  </div>
-                </div>
-                {(parseFloat(metas[monthAnchor]) || 0) > 0 && (
-                  <div className="finance-gauge-card">
-                    <GoalGauge
-                      pct={(financeStatsMes.faturado / (parseFloat(metas[monthAnchor]) || 1)) * 100}
-                      size={104}
-                      label={"Meta de " + mesLabel(monthAnchor)}
-                    />
-                  </div>
-                )}
-              </div>
-              <div className="toolbar">
-                <FilterMenu
-                  id="financeiro"
-                  openId={openFilterMenu}
-                  setOpenId={setOpenFilterMenu}
-                  activeCount={financeClienteFilter ? 1 : 0}
-                >
-                  <div className="filter-menu-field">
-                    <label>Cliente</label>
-                    <select value={financeClienteFilter} onChange={(e) => setFinanceClienteFilter(e.target.value)}>
-                      <option value="">Todos os clientes</option>
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>{c.nome}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {financeClienteFilter && (
-                    <button className="filter-menu-clear" onClick={() => setFinanceClienteFilter("")}>
-                      Limpar filtros
-                    </button>
-                  )}
-                </FilterMenu>
-                <button className="btn-despesa" onClick={() => setTransacaoForm({ ...emptyTransacao("Despesa"), data: monthAnchor + "-05" })}>
-                  <Plus size={14} />Nova despesa
-                </button>
-                <button className="btn-receita" onClick={() => setTransacaoForm({ ...emptyTransacao("Receita"), categoria: tiposProducao[0] || "", tipoReceita: tiposReceita[0] || "", data: monthAnchor + "-05" })}>
-                  <Plus size={15} /> Nova receita
-                </button>
-              </div>
+            (() => {
+              const brl = (v) => "R$ " + v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const brlSinal = (v) => (v < 0 ? "−" : "+") + brl(Math.abs(v));
+              const fmtDM = (iso) => (iso ? iso.slice(8, 10) + "/" + iso.slice(5, 7) : "");
+              const [anoSel, mesSel] = monthAnchor.split("-").map(Number);
+              const mesLongo = MESES_LONGOS[mesSel - 1];
+              const ehMesAtual = monthAnchor === mesRef(hojeISO);
+              const p = painelFin;
+              const pr = p.provisao;
+              const mesSeguinteLongo = MESES_LONGOS[Number(pr.mesSeguinte.slice(5, 7)) - 1].toLowerCase();
+              const negativo = p.saldoPrevisto < 0;
+              const dep = p.dependencia;
+              const corCategoria = (nome) => tags.find((x) => x.nome === nome)?.cor || "#6b7078";
+              const pagasDespesas = finDespesasLista.filter((t) => t.statusPagamento === "Pago");
+              const aPagarDespesas = finDespesasLista.filter((t) => t.statusPagamento !== "Pago");
+              const somaLista = (l) => l.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0);
+              const abrirExcluir = (t) => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId });
+              const transacaoPorId = (id) => transacoes.find((x) => x.id === id);
 
-              <div className="finance-panel">
-                <h3 className="config-section-title finance-panel-title">
-                  <span>Receitas — {mesLabel(monthAnchor)}</span>
-                  <span className="finance-panel-title-right">
-                    <FilterMenu
-                      id="financeiro-receitas"
-                      openId={openFilterMenu}
-                      setOpenId={setOpenFilterMenu}
-                      activeCount={financeStatusReceitaFilter !== "todos" ? 1 : 0}
-                    >
-                      <div className="filter-menu-field">
-                        <label>Status</label>
-                        <select value={financeStatusReceitaFilter} onChange={(e) => setFinanceStatusReceitaFilter(e.target.value)}>
-                          <option value="todos">Todos os status</option>
-                          <option value="atrasadas">Só atrasadas</option>
-                          <option value="pagas">Só recebidas</option>
-                          <option value="pendentes">Só pendentes</option>
-                        </select>
-                      </div>
-                      {financeStatusReceitaFilter !== "todos" && (
-                        <button className="filter-menu-clear" onClick={() => setFinanceStatusReceitaFilter("todos")}>
-                          Limpar filtro
-                        </button>
-                      )}
-                    </FilterMenu>
-                    <span className="finance-panel-total">R$ {filteredReceitas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </span>
-                </h3>
-                {filteredReceitas.length === 0 ? (
-                  <div className="empty">Nenhuma receita neste mês. Receitas de propostas confirmadas aparecem automaticamente.</div>
-                ) : (
-                  <div className="table-scroll"><table>
-                    <thead>
-                      <tr>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "descricao")}>Descrição {financeReceitasSortKey === "descricao" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "tipoReceita")}>Tipo de receita {financeReceitasSortKey === "tipoReceita" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "cliente")}>Cliente / Demanda {financeReceitasSortKey === "cliente" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "valor")}>Valor {financeReceitasSortKey === "valor" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "vencimento")}>Vencimento {financeReceitasSortKey === "vencimento" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th title="Nota emitida — o mês em que é marcada define o faturamento e o imposto">Nota</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("receitas", "status")}>Status {financeReceitasSortKey === "status" ? (financeReceitasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredReceitas.map((t) => {
-                        const statusEfetivo = getStatusPagamentoEfetivo(t);
-                        const demanda = demands.find((d) => d.id === t.demandaId);
-                        return (
-                          <tr key={t.id}>
-                            <td className="proj">
-                              {t.descricao || "(sem descrição)"}
-                              {t.parcelaGrupoId && (
-                                <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>
-                                  {t.parcelaAtual}/{t.parcelaTotal}
-                                </span>
-                              )}
-                            </td>
-                            <td>{t.tipoReceita}</td>
-                            <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
-                            <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                            <td className="mono">{fmtDate(t.data)}</td>
-                            <td>
-                              {t.tipoReceita === TIPO_RECEITA_RETIRADA_RESERVA ? (
-                                "—"
-                              ) : (
-                                <label
-                                  style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11.5 }}
-                                  title={t.notaEmitida ? "Nota emitida em " + fmtDate(t.dataNotaEmitida) + " — clique pra desmarcar" : "Marcar nota como emitida hoje"}
-                                >
-                                  <input type="checkbox" checked={!!t.notaEmitida} onChange={() => toggleNotaEmitida(t)} />
-                                  {t.notaEmitida && <span className="mono">{fmtDate(t.dataNotaEmitida).slice(0, 5)}</span>}
-                                </label>
-                              )}
-                            </td>
-                            <td>
+              function acaoAlerta(a) {
+                const t = a.transacaoId ? transacaoPorId(a.transacaoId) : null;
+                if (a.acao === "cobrar" && t) {
+                  const cli = clients.find((c) => c.id === t.clienteId);
+                  const link = cli ? linkWhatsApp(cli.telefone) : "";
+                  if (link) {
+                    const msg = "Olá! Tudo bem? Passando para lembrar do pagamento de " + (t.descricao || "nossa última entrega") + ", no valor de " + brl(parseFloat(t.valor) || 0) + " (vencimento " + fmtDate(t.data) + "). Qualquer dúvida é só falar!";
+                    window.open(link + "?text=" + encodeURIComponent(msg), "_blank", "noopener");
+                  } else {
+                    setTransacaoForm(t);
+                  }
+                } else if (a.acao === "pagar" && t) {
+                  toggleStatusPagamento(t);
+                } else if (a.acao === "emitir-nota" && t) {
+                  toggleNotaEmitida(t);
+                } else if (a.acao === "categorizar" && t) {
+                  setTransacaoForm(t);
+                } else if (a.acao === "guardar") {
+                  setTransacaoForm({
+                    ...emptyTransacao("Despesa"),
+                    categoria: CATEGORIA_DESPESA_RESERVA,
+                    descricao: "Reserva " + mesLabel(monthAnchor),
+                    valor: String(a.valor),
+                    data: ehMesAtual ? hojeISO : monthAnchor + "-05",
+                  });
+                }
+              }
+              const ROTULO_ACAO = { cobrar: "Cobrar", pagar: "Pagar", "emitir-nota": "Emitir nota", categorizar: "Categorizar", guardar: "Guardar" };
+              function subtituloAlerta(a) {
+                if (a.id.startsWith("rec-atr-")) return [clientName(a.clienteId) !== "—" ? clientName(a.clienteId) : null, "há " + a.dias + (a.dias === 1 ? " dia" : " dias"), brl(a.valor)].filter(Boolean).join(" · ");
+                if (a.id.startsWith("desp-atr-")) return "há " + a.dias + (a.dias === 1 ? " dia" : " dias") + " · " + brl(a.valor);
+                if (a.id.startsWith("sem-nf-")) return [clientName(a.clienteId) !== "—" ? clientName(a.clienteId) : null, brl(a.valor) + " vence " + fmtDM(a.data)].filter(Boolean).join(" · ");
+                if (a.id === "sem-categoria") return a.nomes.slice(0, 3).join(", ") + (a.nomes.length > 3 ? "…" : "") + " · " + brl(a.valor);
+                if (a.id === "reserva") return "Sugestão: " + brl(a.valor) + " (" + a.pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "% do faturado)";
+                return "";
+              }
+
+              function renderLinha(t, receita) {
+                const st = getStatusPagamentoEfetivo(t);
+                const pago = st === "Pago";
+                const demanda = demands.find((d) => d.id === t.demandaId);
+                const [, mm, dd] = (t.data || "--").split("-");
+                const retirada = t.tipoReceita === TIPO_RECEITA_RETIRADA_RESERVA;
+                const cliente = clientName(t.clienteId);
+                const partesSub = [];
+                if (receita) {
+                  if (cliente !== "—") partesSub.push(cliente + (demanda ? " · " + demanda.projeto : ""));
+                  else if (demanda) partesSub.push(demanda.projeto);
+                  else if (retirada) partesSub.push("Retirada da reserva");
+                }
+                return (
+                  <div key={t.id} className={"fz-lrow" + (pago ? " is-dim" : "")}>
+                    <div className={"fz-date" + (st === "Atrasado" ? " late" : "")}>
+                      <b>{dd || "—"}</b>
+                      <span>{mm ? MONTH_LABELS_SHORT[Number(mm) - 1] : ""}</span>
+                    </div>
+                    <div className="fz-lmain">
+                      <p className="fz-ttl">
+                        {t.descricao || "(sem descrição)"}
+                        {t.parcelaGrupoId && <span className="fz-parcela">{t.parcelaAtual}/{t.parcelaTotal}</span>}
+                      </p>
+                      <p className="fz-sub">
+                        {receita ? (
+                          <>
+                            {partesSub.length > 0 && <span>{partesSub.join(" · ")}</span>}
+                            {!retirada && (
                               <button
-                                className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
-                                onClick={() => toggleStatusPagamento(t)}
-                                title="Clique para alternar recebido/pendente"
+                                type="button"
+                                className={"fz-nf " + (t.notaEmitida ? "ok" : "sem")}
+                                onClick={() => toggleNotaEmitida(t)}
+                                title={t.notaEmitida ? "Nota emitida em " + fmtDate(t.dataNotaEmitida) + " — clique para desmarcar" : "Clique para marcar a nota como emitida hoje"}
                               >
-                                {statusEfetivo === "Pago" ? "Recebido" : statusEfetivo}
+                                {t.notaEmitida ? "NF " + fmtDM(t.dataNotaEmitida) : "Sem NF"}
                               </button>
-                            </td>
-                            <td>
-                              <div className="row-actions">
-                                <button className="icon-btn" onClick={() => setTransacaoForm(t)}><Pencil size={13} /></button>
-                                <button className="icon-btn" onClick={() => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId })}><Trash2 size={13} /></button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table></div>
-                )}
-              </div>
-
-              <div className="finance-panel">
-                <h3 className="config-section-title finance-panel-title">
-                  <span>Despesas — {mesLabel(monthAnchor)}</span>
-                  <span className="finance-panel-title-right">
-                    <FilterMenu
-                      id="financeiro-despesas"
-                      openId={openFilterMenu}
-                      setOpenId={setOpenFilterMenu}
-                      activeCount={(financeStatusDespesaFilter !== "todos" ? 1 : 0) + (financeCategoriaDespesaFilter ? 1 : 0)}
-                    >
-                      <div className="filter-menu-field">
-                        <label>Status</label>
-                        <select value={financeStatusDespesaFilter} onChange={(e) => setFinanceStatusDespesaFilter(e.target.value)}>
-                          <option value="todos">Todos os status</option>
-                          <option value="atrasadas">Só atrasadas</option>
-                          <option value="pagas">Só pagas</option>
-                          <option value="pendentes">Só pendentes</option>
-                        </select>
-                      </div>
-                      <div className="filter-menu-field">
-                        <label>Categoria</label>
-                        <select value={financeCategoriaDespesaFilter} onChange={(e) => setFinanceCategoriaDespesaFilter(e.target.value)}>
-                          <option value="">Todas as categorias</option>
-                          {tags.map((tg) => <option key={tg.id} value={tg.nome}>{tg.nome}</option>)}
-                        </select>
-                      </div>
-                      {(financeStatusDespesaFilter !== "todos" || financeCategoriaDespesaFilter) && (
-                        <button className="filter-menu-clear" onClick={() => { setFinanceStatusDespesaFilter("todos"); setFinanceCategoriaDespesaFilter(""); }}>
-                          Limpar filtro
-                        </button>
-                      )}
-                    </FilterMenu>
-                    <span className="finance-panel-total">R$ {filteredDespesas.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </span>
-                </h3>
-                {filteredDespesas.length === 0 ? (
-                  <div className="empty">Nenhuma despesa neste mês.</div>
-                ) : (
-                  <div className="table-scroll"><table>
-                    <thead>
-                      <tr>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "descricao")}>Descrição {financeDespesasSortKey === "descricao" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "categoria")}>Categoria {financeDespesasSortKey === "categoria" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "natureza")}>Natureza {financeDespesasSortKey === "natureza" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "cliente")}>Cliente / Demanda {financeDespesasSortKey === "cliente" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "valor")}>Valor {financeDespesasSortKey === "valor" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "vencimento")}>Vencimento {financeDespesasSortKey === "vencimento" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th className="sortable-th" onClick={() => toggleFinanceSort("despesas", "status")}>Status {financeDespesasSortKey === "status" ? (financeDespesasSortDir === "asc" ? "▲" : "▼") : ""}</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredDespesas.map((t) => {
-                        const statusEfetivo = getStatusPagamentoEfetivo(t);
-                        const demanda = demands.find((d) => d.id === t.demandaId);
-                        return (
-                          <tr key={t.id}>
-                            <td className="proj">
-                              {t.descricao || "(sem descrição)"}
-                              {t.parcelaGrupoId && (
-                                <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>
-                                  {t.parcelaAtual}/{t.parcelaTotal}
-                                </span>
-                              )}
-                            </td>
-                            <td>{t.categoria}</td>
-                            <td>{t.natureza || "Variável"}</td>
-                            <td>{clientName(t.clienteId)}{demanda ? " · " + demanda.projeto : ""}</td>
-                            <td className="mono">R$ {(parseFloat(t.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                            <td className="mono">{fmtDate(t.data)}</td>
-                            <td>
-                              <button
-                                className={"badge finance-status-btn " + (statusEfetivo === "Pago" ? "badge-done" : statusEfetivo === "Atrasado" ? "badge-late" : "badge-wait")}
-                                onClick={() => toggleStatusPagamento(t)}
-                                title="Clique para alternar pago/pendente"
-                              >
-                                {statusEfetivo}
-                              </button>
-                            </td>
-                            <td>
-                              <div className="row-actions">
-                                <button className="icon-btn" onClick={() => setTransacaoForm(t)}><Pencil size={13} /></button>
-                                <button className="icon-btn" onClick={() => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId })}><Trash2 size={13} /></button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table></div>
-                )}
-              </div>
-
-              {resumoPorCategoria.length > 0 && (
-                <div className="categoria-panel">
-                  <div className="categoria-panel-head">
-                    <span>Resumo por categoria — {mesLabel(monthAnchor)}</span>
-                  </div>
-                  <div className="categoria-search-row">
-                    <input
-                      value={categoriaSearch}
-                      onChange={(e) => setCategoriaSearch(e.target.value)}
-                      placeholder="Filtrar categorias…"
-                    />
-                  </div>
-                  <div className="categoria-list">
-                    {resumoPorCategoria
-                      .filter((l) => l.nome.toLowerCase().includes(categoriaSearch.trim().toLowerCase()))
-                      .map((l) => (
-                        <div className="categoria-row" key={l.id}>
-                          <span className="categoria-swatch" style={{ background: l.cor }} />
-                          <span className="categoria-nome">{l.nome}</span>
-                          <span className="categoria-total">R$ {l.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="finance-panel">
-                <h3 className="config-section-title">Resumo financeiro — {mesLabel(monthAnchor)}</h3>
-                {!parametrosFinanceiros.pctImposto && !parametrosFinanceiros.pctReserva && (
-                  <p className="config-hint" style={{ marginBottom: 16 }}>
-                    Configure imposto, pró-labore e reserva em Configurações → Saúde financeira pra refinar esse resumo.
-                  </p>
-                )}
-                <div className="metas-grid">
-                  <div className="metas-card">
-                    <h4>Distribuição do faturamento</h4>
-                    <div className="metas-line"><span>Faturado (notas emitidas)</span><b>R$ {saudeFinanceiraMes.faturado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Impostos ({parametrosFinanceiros.pctImposto || 0}% · vence {fmtDate(saudeFinanceiraMes.vencimentoTributos)})</span><b>- R$ {saudeFinanceiraMes.impostoValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Despesas</span><b>- R$ {saudeFinanceiraMes.despesasOperacionais.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line">
-                      <span>Reserva (sugestão: R$ {saudeFinanceiraMes.reservaValor.toLocaleString("pt-BR", { minimumFractionDigits: 0 })})</span>
-                      <b style={{ color: corReservaDoMes(reservaDoMes, saudeFinanceiraMes.reservaValor) }}>
-                        R$ {reservaDoMes.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </b>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {t.categoria ? <span>{t.categoria}</span> : <span className="fz-sem-cat">{CATEGORIA_SEM}</span>}
+                            {t.natureza === "Fixa" && <span> · fixa</span>}
+                          </>
+                        )}
+                      </p>
                     </div>
-                    <div className="metas-line"><span>INSS ({parametrosFinanceiros.pctInss || 0}% do pró-labore · vence {fmtDate(saudeFinanceiraMes.vencimentoTributos)})</span><b>- R$ {saudeFinanceiraMes.inssValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span style={{ color: "var(--text-dim)" }}>Fator R — mínimo sugerido (28% do faturado)</span><b style={{ color: "var(--text-dim)" }}>R$ {saudeFinanceiraMes.fatorRMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
-                      <span>Sobra livre</span>
-                      <b style={{ color: saudeFinanceiraMes.sobraLivre >= 0 ? "var(--teal)" : "var(--red)" }}>
-                        R$ {saudeFinanceiraMes.sobraLivre.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </b>
-                    </div>
-                  </div>
-                  <div className="metas-card">
-                    <h4>Fôlego financeiro</h4>
-                    <div className="metas-line"><span>Saldo acumulado</span><b>R$ {saldoAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line"><span>Média de despesas (6 meses)</span><b>R$ {saudeFinanceiraMes.mediaDespesas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
-                    <div className="metas-line">
-                      <span>Meses garantidos</span>
-                      <b>{saudeFinanceiraMes.mesesGarantidos == null ? "—" : saudeFinanceiraMes.mesesGarantidos.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses"}</b>
-                    </div>
-                    <div className="metas-line">
-                      <span>Reserva ideal ({MESES_RESERVA_IDEAL} meses de custo)</span>
-                      <b>R$ {saudeFinanceiraMes.reservaIdealValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-                    </div>
-                    {saudeFinanceiraMes.pctDaReservaIdeal != null && (
-                      <div className="metas-line">
-                        <span>% da reserva ideal já garantido</span>
-                        <b style={{ color: saudeFinanceiraMes.pctDaReservaIdeal >= 100 ? "var(--teal)" : "var(--amber)" }}>
-                          {Math.min(999, saudeFinanceiraMes.pctDaReservaIdeal).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%
-                        </b>
-                      </div>
-                    )}
-                    <div className="metas-line" style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 10 }}>
-                      <span>Reserva destinada até {mesLabel(monthAnchor)}</span>
-                      <b>R$ {reservaAcumulada.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-                    </div>
+                    <div className="fz-lvalor">{brl(parseFloat(t.valor) || 0)}</div>
                     <button
-                      className="btn-ghost"
-                      style={{ marginTop: 10, width: "100%" }}
-                      onClick={() => setRetiradaReservaForm({ valor: "", data: todayISO(), descricao: "" })}
+                      type="button"
+                      className={"fz-chip " + (pago ? "ok" : st === "Atrasado" ? "late" : "wait")}
+                      onClick={() => toggleStatusPagamento(t)}
+                      title={receita ? "Clique para alternar recebido/pendente" : "Clique para alternar pago/pendente"}
                     >
-                      Retirar da poupança
+                      {pago ? (receita ? "Recebido" : "Pago") : st === "Atrasado" ? "Atrasado" : receita ? "A receber" : "A pagar"}
                     </button>
+                    <div className="fz-lactions">
+                      <button className="icon-btn" onClick={() => setTransacaoForm(t)} title="Editar"><Pencil size={13} /></button>
+                      <button className="icon-btn" onClick={() => abrirExcluir(t)} title="Excluir"><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="fz-fin">
+                  <div className="fz-head">
+                    <div>
+                      <div className="fz-eyebrow">Financeiro</div>
+                      <div className="fz-title-row">
+                        <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, -1))} title="Mês anterior"><ChevronLeft size={14} /></button>
+                        <h2 className="fz-title">{mesLongo} {anoSel}</h2>
+                        <button className="icon-btn" onClick={() => setMonthAnchor(addMonthsISO(monthAnchor, 1))} title="Próximo mês"><ChevronRight size={14} /></button>
+                        {!ehMesAtual && (
+                          <button className="btn-ghost kanban-today-btn" onClick={() => setMonthAnchor(mesRef(hojeISO))}>Mês atual</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="fz-head-actions">
+                      <FilterMenu
+                        id="financeiro"
+                        openId={openFilterMenu}
+                        setOpenId={setOpenFilterMenu}
+                        align="right"
+                        activeCount={financeClienteFilter ? 1 : 0}
+                      >
+                        <div className="filter-menu-field">
+                          <label>Cliente (só nas listas de lançamentos)</label>
+                          <select value={financeClienteFilter} onChange={(e) => setFinanceClienteFilter(e.target.value)}>
+                            <option value="">Todos os clientes</option>
+                            {clients.map((c) => (
+                              <option key={c.id} value={c.id}>{c.nome}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {financeClienteFilter && (
+                          <button className="filter-menu-clear" onClick={() => setFinanceClienteFilter("")}>Limpar filtros</button>
+                        )}
+                      </FilterMenu>
+                      <button className="fz-btn fz-btn-in" onClick={() => setTransacaoForm({ ...emptyTransacao("Receita"), categoria: tiposProducao[0] || "", tipoReceita: tiposReceita[0] || "", data: monthAnchor + "-05" })}>
+                        <Plus size={15} /> Receita
+                      </button>
+                      <button className="fz-btn fz-btn-out" onClick={() => setTransacaoForm({ ...emptyTransacao("Despesa"), data: monthAnchor + "-05" })}>
+                        <span className="fz-minus">−</span> Despesa
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* A conta do mês */}
+                  <div className="fz-hero">
+                    <div className="fz-card fz-hero-card">
+                      <div className="fz-label">{ehMesAtual ? "Caixa hoje" : "Caixa acumulado"}</div>
+                      <div className={"fz-big" + (p.caixaHoje < 0 ? " neg" : "")}>{brl(p.caixaHoje)}</div>
+                      <div className="fz-hint">Saldo acumulado até {fmtDM(ehMesAtual ? hojeISO : p.fimMes)}</div>
+                    </div>
+                    <span className="fz-op">+</span>
+                    <div className="fz-card fz-hero-card">
+                      <div className="fz-label in">A receber</div>
+                      <div className="fz-big in">{brl(p.aReceber)}</div>
+                      <div className="fz-bar"><i className="in" style={{ width: p.pctRecebido + "%" }} /></div>
+                      <div className="fz-hint">{brl(p.recebido)} recebido de {brl(p.totalReceitas)} ({p.pctRecebido}%)</div>
+                    </div>
+                    <span className="fz-op">−</span>
+                    <div className="fz-card fz-hero-card">
+                      <div className="fz-label out">A pagar</div>
+                      <div className="fz-big out">{brl(p.aPagar)}</div>
+                      <div className="fz-bar"><i className="out" style={{ width: p.pctPago + "%" }} /></div>
+                      <div className="fz-hint">{brl(p.pago)} pago de {brl(p.totalDespesas)} ({p.pctPago}%)</div>
+                    </div>
+                    <span className="fz-op">=</span>
+                    <div className={"fz-card fz-hero-card fz-hero-main" + (negativo ? " neg" : "")}>
+                      <div className="fz-label">Saldo previsto em {fmtDM(p.fimMes)}</div>
+                      <div className={"fz-big" + (negativo ? " neg" : "")}>{brl(p.saldoPrevisto)}</div>
+                      <div className="fz-hint">
+                        Resultado do mês: <b className={p.resultadoMes < 0 ? "out" : "in"}>{brlSinal(p.resultadoMes)}</b>
+                      </div>
+                      <div className="fz-hint">receitas {brl(p.totalReceitas)} − despesas {brl(p.totalDespesas)}</div>
+                      {p.anterioresAbertos > 0 && (
+                        <div className="fz-hint warn">Inclui {p.anterioresAbertos} {p.anterioresAbertos === 1 ? "lançamento aberto" : "lançamentos abertos"} de meses anteriores ({brlSinal(p.anterioresLiquido)})</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Agenda + atenção */}
+                  <div className="fz-row-2">
+                    <div className="fz-card">
+                      <div className="fz-card-title">{ehMesAtual ? "Daqui até o fim do mês" : "Pendências até o fim do mês"}</div>
+                      {dep && dep.tipo === "negativo" && (
+                        <div className="fz-alert-box red">
+                          O caixa fica negativo em <b>{fmtDM(dep.data)}</b>{dep.causa ? <>, quando sai <b>{dep.causa}</b></> : null}.
+                        </div>
+                      )}
+                      {dep && dep.tipo === "depende" && (
+                        <div className="fz-alert-box">
+                          O mês depende da <b>{(dep.cliente && clientName(dep.cliente) !== "—" ? clientName(dep.cliente) : dep.descricao) + " (" + brl(dep.valor) + " em " + fmtDM(dep.dataReceita) + ")"}</b>. Se atrasar, o caixa fica negativo a partir de {fmtDM(dep.dataNegativo)}{dep.causa ? <>, quando sai <b>{dep.causa}</b></> : null}.
+                        </div>
+                      )}
+                      {p.agenda.length === 0 ? (
+                        <div className="empty">Nada pendente até o fim do mês.</div>
+                      ) : (
+                        <div className="fz-agenda">
+                          <div className="fz-trow fz-thead">
+                            <span>Data</span><span>Lançamento</span><span className="r">Valor</span><span className="r fz-col-saldo">Saldo após</span>
+                          </div>
+                          {p.agenda.map((a) => (
+                            <div className="fz-trow" key={a.t.id}>
+                              <span className={"num" + (a.atrasado ? " late" : " muted")}>{fmtDM(a.data)}</span>
+                              <span className="fz-trow-desc">
+                                {a.t.descricao || "(sem descrição)"}
+                                {a.atrasado && <span className="fz-chip late fz-chip-sm">Atrasado</span>}
+                              </span>
+                              <span className={"num r " + (a.sinal > 0 ? "in" : "out")}>{brlSinal(a.sinal * a.valor)}</span>
+                              <span className={"num r bal fz-col-saldo" + (a.saldoApos < 0 ? " neg" : "")}>{brl(a.saldoApos)}</span>
+                            </div>
+                          ))}
+                          <div className="fz-trow fz-tfoot">
+                            <span />
+                            <span>Saldo previsto em {fmtDM(p.fimMes)}</span>
+                            <span />
+                            <span className={"num r bal fz-col-saldo" + (negativo ? " neg" : "")}>{brl(p.saldoPrevisto)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="fz-card">
+                      <div className="fz-card-title">Precisa de atenção</div>
+                      {p.alertas.length === 0 ? (
+                        <div className="fz-ok-state">Tudo em dia ✓</div>
+                      ) : (
+                        <div className="fz-alerts">
+                          {p.alertas.map((a) => (
+                            <div className="fz-alert" key={a.id}>
+                              <i className={"fz-dot " + a.nivel} />
+                              <div className="fz-alert-body">
+                                <p className="fz-ttl">{a.titulo}</p>
+                                <p className="fz-sub">{subtituloAlerta(a)}</p>
+                              </div>
+                              <button className="fz-alert-btn" onClick={() => acaoAlerta(a)}>{ROTULO_ACAO[a.acao]}</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+
+                  {/* Fôlego + categorias */}
+                  <div className="fz-row-2 even">
+                    <div className="fz-card">
+                      <div className="fz-card-title fz-card-title-row">
+                        <span>Fôlego da empresa</span>
+                        <div className="filter-menu">
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title="Mais ações"
+                            onClick={(e) => { e.stopPropagation(); setOpenFilterMenu(openFilterMenu === "folego-menu" ? null : "folego-menu"); }}
+                          >
+                            <MoreHorizontal size={14} />
+                          </button>
+                          {openFilterMenu === "folego-menu" && (
+                            <div className="filter-menu-popover align-right" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                className="btn-ghost"
+                                style={{ width: "100%" }}
+                                onClick={() => { setOpenFilterMenu(null); setRetiradaReservaForm({ valor: "", data: todayISO(), descricao: "" }); }}
+                              >
+                                Retirar da poupança
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {p.folego.meses == null ? (
+                        <div className="fz-hint">Ainda não há despesas suficientes nos últimos 6 meses para calcular.</div>
+                      ) : (
+                        <>
+                          <p className="fz-folego-txt">
+                            O caixa de hoje cobre <b>{p.folego.meses.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} {p.folego.meses >= 2 ? "meses" : "mês"}</b> de custos
+                          </p>
+                          <div className="fz-bar big"><i className={p.folego.pct >= 100 ? "in" : "amber"} style={{ width: p.folego.pct + "%" }} /></div>
+                          <div className="fz-hint">
+                            {brl(p.folego.caixa)} de {brl(p.folego.meta)} (meta de 6 meses · custo médio {brl(p.folego.media)}/mês)
+                          </div>
+                        </>
+                      )}
+                      <div className="fz-hint" style={{ marginTop: 8 }}>Guardado na reserva: {brl(reservaAcumulada)}</div>
+                    </div>
+                    <div className="fz-card">
+                      <div className="fz-card-title">Separar para {mesSeguinteLongo}</div>
+                      <div className="fz-prov">
+                        <div className="fz-prov-line">
+                          <div>
+                            <p className="fz-ttl">Simples Nacional</p>
+                            <p className="fz-sub">{pr.pctImposto.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% de {brl(pr.faturadoNotas)} em notas · vence {fmtDM(pr.vencimento)}</p>
+                          </div>
+                          <b className="num">{brl(pr.simples)}</b>
+                        </div>
+                        <div className="fz-prov-line">
+                          <div>
+                            <p className="fz-ttl">INSS sobre pró-labore</p>
+                            <p className="fz-sub">{pr.pctInss.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% de {brl(pr.proLaboreTotal)} · vence {fmtDM(pr.vencimento)}</p>
+                          </div>
+                          <b className="num">{brl(pr.inss)}</b>
+                        </div>
+                        <div className="fz-prov-line total">
+                          <p className="fz-ttl">Total a provisionar</p>
+                          <b className="num">{brl(pr.total)}</b>
+                        </div>
+                        <div className={"fz-seal " + (pr.fatorROk ? "ok" : "bad")}>
+                          {pr.fatorROk
+                            ? "Fator R ok · pró-labore " + brl(pr.proLaboreTotal) + " ≥ " + brl(pr.fatorRMinimo) + " (28% das notas)"
+                            : "Fator R abaixo do mínimo · faltam " + brl(pr.fatorRFalta) + " de pró-labore (28% das notas = " + brl(pr.fatorRMinimo) + ")"}
+                        </div>
+                      </div>
+                      {!parametrosFinanceiros.pctImposto && (
+                        <p className="config-hint" style={{ marginTop: 12 }}>Configure o imposto em Configurações → Saúde financeira para calcular a provisão.</p>
+                      )}
+                    </div>
+
+                  </div>
+
+                  {/* Lançamentos (+ provisão sob as receitas) */}
+                  <div className="fz-row-2 even">
+                    <div className="fz-col">
+                      <div className="fz-card">
+                        <div className="fz-card-title fz-card-title-row">
+                          <span>Receitas</span>
+                          <span className="fz-total in">{brl(somaLista(finReceitasLista))}</span>
+                        </div>
+                        {finReceitasLista.length === 0 ? (
+                          <div className="empty">Nenhuma receita neste mês. Receitas de propostas confirmadas aparecem automaticamente.</div>
+                        ) : (
+                          <div className="fz-list">
+                            {finReceitasLista.map((t) => renderLinha(t, true))}
+                          </div>
+                        )}
+                      </div>
+
+
+                    <div className="fz-card">
+                      <div className="fz-card-title">Para onde vai o dinheiro</div>
+                      {p.categorias.length === 0 ? (
+                        <div className="empty">Sem despesas neste mês.</div>
+                      ) : (
+                        <div className="fz-cats">
+                          {p.categorias.map((c) => {
+                            const sem = c.nome === CATEGORIA_SEM;
+                            return (
+                              <div className="fz-cat" key={c.nome}>
+                                <div className="fz-cat-head">
+                                  <span className={"fz-cat-nome" + (sem ? " sem" : "")}>{c.nome}</span>
+                                  <span className="fz-cat-val">{c.pct.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}% · {brl(c.total)}</span>
+                                </div>
+                                <div className="fz-bar"><i style={{ width: c.pct + "%", background: sem ? "var(--amber)" : corCategoria(c.nome) }} /></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    </div>
+                    <div className="fz-card">
+                      <div className="fz-card-title fz-card-title-row">
+                        <span>Despesas</span>
+                        <span className="fz-total out">{brl(somaLista(finDespesasLista))}</span>
+                      </div>
+                      {finDespesasLista.length === 0 ? (
+                        <div className="empty">Nenhuma despesa neste mês.</div>
+                      ) : (
+                        <>
+                          {aPagarDespesas.length > 0 && (
+                            <>
+                              <div className="fz-group-head"><span>A pagar · {brl(somaLista(aPagarDespesas))}</span></div>
+                              <div className="fz-list">
+                                {aPagarDespesas.map((t) => renderLinha(t, false))}
+                              </div>
+                            </>
+                          )}
+                          {pagasDespesas.length > 0 && (
+                            <>
+                              <div className="fz-group-head">
+                                <span>Pagas · {brl(somaLista(pagasDespesas))}</span>
+                                <button
+                                  type="button"
+                                  className="fz-link-btn"
+                                  onClick={() => {
+                                    const novo = !despesasPagasOcultas;
+                                    setDespesasPagasOcultas(novo);
+                                    try { localStorage.setItem("fin_despesas_pagas_ocultas", novo ? "1" : "0"); } catch {}
+                                  }}
+                                >
+                                  {despesasPagasOcultas ? "Mostrar" : "Ocultar"}
+                                </button>
+                              </div>
+                              {!despesasPagasOcultas && (
+                                <div className="fz-list">
+                                  {pagasDespesas.map((t) => renderLinha(t, false))}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </>
+              );
+            })()
           ) : tab === "metas" ? (
             <>
               <div className="month-nav">
