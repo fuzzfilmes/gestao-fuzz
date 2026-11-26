@@ -1,22 +1,24 @@
 import React, { useState } from "react";
 import { supabase } from "./lib/supabaseClient.js";
 
+function mensagemDeErro(error) {
+  const m = (error.message || "").toLowerCase();
+  if (m.includes("already registered")) return "Esse email já tem senha. Entre com ela ou peça um novo código à Fuzz.";
+  if (m.includes("signups not allowed") || m.includes("signup is disabled")) return "O primeiro acesso está desativado no momento. Avise a Fuzz.";
+  if (m.includes("database error")) return "Email ou código não conferem, ou o código expirou.";
+  if (m.includes("rate limit")) return "Muitas tentativas. Aguarde alguns minutos.";
+  if (m.includes("password")) return "Senha não aceita. Use uma senha mais forte.";
+  return "Não consegui criar o acesso. Confira os dados e tente de novo.";
+}
+
 export default function Login() {
-  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
+  const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
+  const [codigo, setCodigo] = useState("");
+  const [confirmacao, setConfirmacao] = useState("");
   const [loading, setLoading] = useState(false);
-
-  function switchMode(novoModo) {
-    setMode(novoModo);
-    setError("");
-    setInfo("");
-    setPassword("");
-    setConfirmPassword("");
-  }
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -27,36 +29,31 @@ export default function Login() {
     if (error) setError("Email ou senha inválidos.");
   }
 
-  async function handleSignup(e) {
-    e.preventDefault();
+  function alternarModo() {
+    setPrimeiroAcesso(!primeiroAcesso);
     setError("");
-    setInfo("");
-    if (password.length < 6) {
-      setError("A senha precisa ter pelo menos 6 caracteres.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("As senhas não conferem.");
-      return;
-    }
-    setLoading(true);
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    setLoading(false);
-    if (error) {
-      setError(error.message === "User already registered" ? "Já existe uma conta com esse email." : "Não consegui criar a conta. Tente de novo.");
-      return;
-    }
-    if (!data.session) {
-      setInfo("Conta criada! Verifique seu email pra confirmar antes de entrar.");
-      setPassword("");
-      setConfirmPassword("");
-    }
-    // Se a confirmação de email estiver desligada no projeto Supabase,
-    // data.session já vem preenchida e o listener em main.jsx troca pra
-    // a tela principal sozinho, sem precisar de nada aqui.
+    setPassword("");
+    setConfirmacao("");
+    setCodigo("");
   }
 
-  const isSignup = mode === "signup";
+  // Primeiro acesso da equipe: o banco só cria a conta se o código conferir com o email.
+  async function handlePrimeiroAcesso(e) {
+    e.preventDefault();
+    setError("");
+    if (password.length < 8) return setError("A senha precisa ter pelo menos 8 caracteres.");
+    if (password !== confirmacao) return setError("As senhas não conferem.");
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { data: { codigo_acesso: codigo.trim() } },
+    });
+    setLoading(false);
+    if (error) setError(mensagemDeErro(error));
+    else if (!data.session) setError("Não foi possível entrar automaticamente. Avise a Fuzz.");
+    // Com a sessão criada, o main.jsx abre o painel sozinho.
+  }
 
   return (
     <div
@@ -70,7 +67,7 @@ export default function Login() {
       }}
     >
       <form
-        onSubmit={isSignup ? handleSignup : handleLogin}
+        onSubmit={primeiroAcesso ? handlePrimeiroAcesso : handleLogin}
         style={{
           width: 320,
           background: "#131519",
@@ -87,7 +84,7 @@ export default function Login() {
             Painel de Produção
           </h1>
           <p style={{ color: "#7D848C", fontSize: 13, margin: 0 }}>
-            {isSignup ? "Criar sua conta" : "Fuzz Produtora"}
+            {primeiroAcesso ? "Primeiro acesso: crie a sua senha" : "Fuzz Produtora"}
           </p>
         </div>
 
@@ -103,26 +100,42 @@ export default function Login() {
           />
         </label>
 
+        {primeiroAcesso && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ color: "#7D848C", fontSize: 12 }}>Código de primeiro acesso</span>
+            <input
+              required
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value)}
+              style={inputStyle}
+              placeholder="XXXXX-XXXXX"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+            />
+          </label>
+        )}
+
         <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ color: "#7D848C", fontSize: 12 }}>Senha</span>
+          <span style={{ color: "#7D848C", fontSize: 12 }}>{primeiroAcesso ? "Crie sua senha (mínimo 8 caracteres)" : "Senha"}</span>
           <input
             type="password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={inputStyle}
-            autoComplete={isSignup ? "new-password" : "current-password"}
+            autoComplete={primeiroAcesso ? "new-password" : "current-password"}
           />
         </label>
 
-        {isSignup && (
+        {primeiroAcesso && (
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ color: "#7D848C", fontSize: 12 }}>Confirmar senha</span>
+            <span style={{ color: "#7D848C", fontSize: 12 }}>Repita a senha</span>
             <input
               type="password"
               required
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              value={confirmacao}
+              onChange={(e) => setConfirmacao(e.target.value)}
               style={inputStyle}
               autoComplete="new-password"
             />
@@ -131,9 +144,6 @@ export default function Login() {
 
         {error && (
           <div style={{ color: "#FF3B30", fontSize: 12.5 }}>{error}</div>
-        )}
-        {info && (
-          <div style={{ color: "#4FA8A0", fontSize: 12.5 }}>{info}</div>
         )}
 
         <button
@@ -152,23 +162,22 @@ export default function Login() {
             opacity: loading ? 0.7 : 1,
           }}
         >
-          {loading ? (isSignup ? "Criando..." : "Entrando...") : (isSignup ? "Criar conta" : "Entrar")}
+          {loading ? (primeiroAcesso ? "Criando..." : "Entrando...") : primeiroAcesso ? "Criar senha e entrar" : "Entrar"}
         </button>
 
         <button
           type="button"
-          onClick={() => switchMode(isSignup ? "login" : "signup")}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#7D848C",
-            fontSize: 12.5,
-            cursor: "pointer",
-            padding: 0,
-          }}
+          onClick={alternarModo}
+          style={{ background: "none", border: "none", color: "#7D848C", fontSize: 12.5, cursor: "pointer", padding: 0 }}
         >
-          {isSignup ? "Já tem uma conta? Entrar" : "Não tem conta? Criar conta"}
+          {primeiroAcesso ? "Já tenho senha — entrar" : "Primeiro acesso"}
         </button>
+        {!primeiroAcesso && (
+          <p style={{ color: "#5c636b", fontSize: 11.5, margin: 0, textAlign: "center" }}>
+            Esqueceu a senha? Peça um novo código à Fuzz.
+          </p>
+        )}
+
       </form>
     </div>
   );

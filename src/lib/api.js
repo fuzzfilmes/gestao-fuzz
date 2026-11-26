@@ -118,6 +118,7 @@ function notaReuniaoFromRow(r) {
     titulo: r.titulo || "",
     data: r.data || "",
     conteudo: r.conteudo || "",
+    autorNome: r.autor_nome || "",
   };
 }
 export async function listNotasReuniao() {
@@ -167,6 +168,8 @@ function demandaToRow(d) {
     cliente_id: n(d.clienteId),
     tipo: d.tipo || "",
     editor: d.editor || "",
+    // só envia a coluna quando ela existe no banco (migração 025)
+    ...(d.editorMembroId !== undefined && { editor_membro_id: n(d.editorMembroId) }),
     status: d.status || "",
     data_entrega: n(d.dataEntrega),
     data_envio_aprovacao: n(d.dataEnvioAprovacao),
@@ -194,6 +197,7 @@ function demandaFromRow(r, itensByDemanda) {
     clienteId: r.cliente_id || "",
     tipo: r.tipo,
     editor: r.editor,
+    editorMembroId: r.editor_membro_id === undefined ? undefined : r.editor_membro_id || "",
     status: r.status || "",
     dataEntrega: r.data_entrega || "",
     dataEnvioAprovacao: r.data_envio_aprovacao || "",
@@ -751,4 +755,125 @@ export async function downloadArquivoCliente(path) {
 export async function deleteArquivoCliente(id, path) {
   await supabase.storage.from("arquivos-cliente").remove([path]);
   throwIfError(await supabase.from("arquivos_cliente").delete().eq("id", id));
+}
+
+// ---------- Equipe e acessos ----------
+function equipeMembroFromRow(r) {
+  return {
+    id: r.id, nome: r.nome, email: r.email, papel: r.papel, clientesIds: r.clientes_ids || [], ativo: r.ativo,
+    // undefined enquanto a migração 026 não for rodada
+    acessoCriadoEm: r.acesso_criado_em, conviteExpira: r.convite_expira,
+  };
+}
+export async function listEquipeMembros() {
+  const res = await supabase.from("equipe_membros").select("*").order("created_at");
+  throwIfError(res);
+  return res.data.map(equipeMembroFromRow);
+}
+export async function criarEquipeMembro({ nome, email, papel, clientesIds }) {
+  throwIfError(await supabase.from("equipe_membros").insert({
+    nome: nome.trim(),
+    email: email.trim().toLowerCase(),
+    papel,
+    clientes_ids: papel === "social" ? clientesIds : [],
+  }));
+}
+export async function atualizarEquipeMembro(id, campos) {
+  const row = {};
+  if ("nome" in campos) row.nome = campos.nome.trim();
+  if ("ativo" in campos) row.ativo = campos.ativo;
+  if ("clientesIds" in campos) row.clientes_ids = campos.clientesIds;
+  throwIfError(await supabase.from("equipe_membros").update(row).eq("id", id));
+}
+// Código de primeiro acesso. Com redefinir = true, apaga o login anterior pra pessoa criar outra senha.
+export async function gerarCodigoAcesso(membroId, redefinir = false) {
+  const { data, error } = await supabase.rpc("equipe_gerar_codigo", { p_membro: membroId, p_redefinir: redefinir });
+  if (error) throw error;
+  return data;
+}
+export async function excluirEquipeMembro(id) {
+  throwIfError(await supabase.from("equipe_membros").delete().eq("id", id));
+}
+
+// Dados da tela da equipe. Devolve null quando o login é o dono do próprio painel
+// (ou quando a migração 025 ainda não foi rodada).
+export async function getPainelEquipe() {
+  const { data, error } = await supabase.rpc("painel_equipe");
+  if (error) {
+    if (error.code === "PGRST202") return null;
+    throw error;
+  }
+  return data;
+}
+
+// ---------- Colaboração: materiais, cronograma e recados (visão do dono) ----------
+export async function listMateriais() {
+  const res = await supabase.from("materiais_cliente").select("*").order("created_at");
+  throwIfError(res);
+  return res.data.map((r) => ({ id: r.id, clienteId: r.cliente_id, titulo: r.titulo, link: r.link, texto: r.texto }));
+}
+export async function salvarMaterial(m) {
+  const row = { cliente_id: m.clienteId, titulo: m.titulo.trim(), link: (m.link || "").trim(), texto: m.texto || "" };
+  const q = supabase.from("materiais_cliente");
+  throwIfError(await (m.id ? q.update(row).eq("id", m.id) : q.insert(row)));
+}
+export async function excluirMaterial(id) {
+  throwIfError(await supabase.from("materiais_cliente").delete().eq("id", id));
+}
+
+export async function listAgendaCliente() {
+  const res = await supabase.from("agenda_cliente").select("*").order("data");
+  throwIfError(res);
+  return res.data.map((r) => ({
+    id: r.id, clienteId: r.cliente_id, tipo: r.tipo, titulo: r.titulo, data: r.data, hora: r.hora,
+    rede: r.rede, descricao: r.descricao, link: r.link, status: r.status, autorNome: r.autor_nome,
+  }));
+}
+export async function salvarAgenda(i) {
+  const row = {
+    cliente_id: i.clienteId, tipo: i.tipo, titulo: i.titulo.trim(), data: i.data, hora: i.hora || "",
+    rede: i.rede || "", descricao: i.descricao || "", link: (i.link || "").trim(), status: i.status || "planejado",
+  };
+  const q = supabase.from("agenda_cliente");
+  throwIfError(await (i.id ? q.update(row).eq("id", i.id) : q.insert(row)));
+}
+export async function excluirAgenda(id) {
+  throwIfError(await supabase.from("agenda_cliente").delete().eq("id", id));
+}
+
+export async function listRecados() {
+  const res = await supabase.from("recados").select("*").order("created_at", { ascending: false }).limit(200);
+  throwIfError(res);
+  return res.data;
+}
+export async function enviarRecadoDono({ destino, clienteId, texto }) {
+  throwIfError(await supabase.from("recados").insert({
+    para_membro_id: destino === "todos" ? null : destino,
+    para_todos: destino === "todos",
+    cliente_id: clienteId || null,
+    texto,
+  }));
+}
+export async function excluirRecado(id) {
+  throwIfError(await supabase.from("recados").delete().eq("id", id));
+}
+export async function marcarRecadoLido(id) {
+  throwIfError(await supabase.rpc("marcar_recado_lido", { p_id: id }));
+}
+
+// ---------- Gravações feitas pela equipe (as permissões são conferidas no banco) ----------
+export async function equipeSalvarAgenda(item) {
+  throwIfError(await supabase.rpc("equipe_salvar_agenda", { p: item }));
+}
+export async function equipeExcluirAgenda(id) {
+  throwIfError(await supabase.rpc("equipe_excluir_agenda", { p_id: id }));
+}
+export async function equipeSalvarNota(nota) {
+  throwIfError(await supabase.rpc("equipe_salvar_nota", { p: nota }));
+}
+export async function equipeExcluirNota(id) {
+  throwIfError(await supabase.rpc("equipe_excluir_nota", { p_id: id }));
+}
+export async function equipeEnviarRecado(recado) {
+  throwIfError(await supabase.rpc("equipe_enviar_recado", { p: recado }));
 }
