@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Calendar, ChevronLeft, ChevronRight, DollarSign, ExternalLink, Eye, Film, GripVertical, LayoutGrid, Lock, LogOut, MessageCircle, NotebookText, Pencil, Plus, RefreshCw, Search, StickyNote, Trash2, X } from "lucide-react";
+import { AlertTriangle, Calendar, Check, CheckCircle2, ChevronLeft, ChevronRight, DollarSign, ExternalLink, Eye, Film, GripVertical, LayoutGrid, Lock, LogOut, MessageCircle, NotebookText, Pencil, Plus, RefreshCw, Search, StickyNote, Trash2, X } from "lucide-react";
 import { supabase } from "./lib/supabaseClient.js";
 import * as api from "./lib/api.js";
-import { unidadesDoTrabalho, getUrgencia, videoProgress, statsDeProducao, TONE_CLASS } from "./lib/trabalhos.js";
+import { unidadesDoTrabalho, getUrgencia, videoProgress, statsDeProducao, videosComStatus, TONE_CLASS, STATUS_AGUARDANDO, STATUS_ALTERACAO } from "./lib/trabalhos.js";
+import Retorno from "./equipe/Retorno.jsx";
 import { APP_CSS } from "./appStyle.js";
 import { CSS_EQUIPE } from "./equipe/estilo.js";
 import { MENU } from "./equipe/menu.js";
@@ -48,6 +49,8 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
   const [clienteAberto, setClienteAberto] = useState("");
   const [demandaAberta, setDemandaAberta] = useState("");
   const [atualizando, setAtualizando] = useState(false);
+  const [focoDemandas, setFocoDemandas] = useState([]); // demandas que devem abrir já expandidas
+  const [resposta, setResposta] = useState(null); // { alvo, decisao }
 
   // Mantém tudo em dia sem a pessoa precisar recarregar.
   useEffect(() => {
@@ -80,7 +83,22 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
     excluirNota: gravar(api.equipeExcluirNota),
     enviarRecado: gravar(api.equipeEnviarRecado),
     marcarLido: gravar(api.marcarRecadoLido),
+    responderVideo: gravar(api.equipeResponderVideo),
   };
+
+  // O que pede ação de quem está logado: a social aprova; quem edita faz as alterações.
+  const paraAprovar = useMemo(() => videosComStatus(trabalhos, [STATUS_AGUARDANDO]), [trabalhos]);
+  const emAlteracao = useMemo(() => videosComStatus(trabalhos, [STATUS_ALTERACAO]), [trabalhos]);
+  const pendentes = ehSocial ? paraAprovar : emAlteracao;
+  const textoPendentes =
+    pendentes.length === 1
+      ? ehSocial ? "1 vídeo aguardando a sua aprovação." : "1 vídeo com alteração solicitada."
+      : pendentes.length + (ehSocial ? " vídeos aguardando a sua aprovação." : " vídeos com alteração solicitada.");
+
+  function irParaVideos(lista) {
+    setFocoDemandas([...new Set(lista.map((v) => v.demanda.id))]);
+    setAba("demandas");
+  }
 
   const naoLidos = recadosNaoLidos(recados);
   const stats = useMemo(() => statsDeProducao(trabalhos), [trabalhos]);
@@ -117,6 +135,7 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
                 <item.Icone size={16} /> <span className="rail-label">{item.nome}</span>
                 {!ok && <Lock size={11} className="eq-cadeado" />}
                 {ok && item.id === "recados" && naoLidos.length > 0 && <span className="rail-tag rail-tag-alert">{naoLidos.length}</span>}
+                {ok && item.id === "demandas" && pendentes.length > 0 && <span className="rail-tag rail-tag-alert">{pendentes.length}</span>}
               </button>
             );
           })}
@@ -143,13 +162,22 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
           </div>
 
           <div className="slate">
-            {naoLidos.length > 0 && aba !== "recados" && (
+            {membro.ativo && (pendentes.length > 0 || (naoLidos.length > 0 && aba !== "recados")) && (
               <div className="notifications-row">
-                <div className="followup-banner tone-wait">
-                  <AlertTriangle size={13} />
-                  <span>{naoLidos.length === 1 ? "Você tem 1 recado novo." : "Você tem " + naoLidos.length + " recados novos."}</span>
-                  <button className="followup-link" onClick={() => setAba("recados")}>Ver recados</button>
-                </div>
+                {pendentes.length > 0 && (
+                  <div className="followup-banner tone-urgent">
+                    <AlertTriangle size={13} />
+                    <span>{textoPendentes}</span>
+                    <button className="followup-link" onClick={() => irParaVideos(pendentes)}>Ver vídeos</button>
+                  </div>
+                )}
+                {naoLidos.length > 0 && aba !== "recados" && (
+                  <div className="followup-banner tone-wait">
+                    <AlertTriangle size={13} />
+                    <span>{naoLidos.length === 1 ? "Você tem 1 recado novo." : "Você tem " + naoLidos.length + " recados novos."}</span>
+                    <button className="followup-link" onClick={() => setAba("recados")}>Ver recados</button>
+                  </div>
+                )}
               </div>
             )}
             <div className="stats-row">
@@ -180,6 +208,22 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
                   </div>
                 </div>
                 <div className="home-right">
+                  <div className="home-card">
+                    <h4><CheckCircle2 size={14} /> {ehSocial ? "Vídeos para aprovar" : "Alterações para fazer"}{pendentes.length > 0 ? " · " + pendentes.length : ""}</h4>
+                    {pendentes.length === 0 && <div className="home-card-empty">{ehSocial ? "Nenhum vídeo aguardando aprovação." : "Nenhuma alteração solicitada."}</div>}
+                    {pendentes.map((v) => (
+                      <div key={v.demanda.id + v.itemId} className="home-row" onClick={() => irParaVideos([v])}>
+                        <span className="home-row-dot tone-urgent" />
+                        <span className="home-row-title">{v.nome}</span>
+                        <span className="home-row-sub">{[v.demanda.clienteNome, v.itemId ? v.demanda.projeto : ""].filter(Boolean).join(" · ")}</span>
+                      </div>
+                    ))}
+                    {ehSocial && emAlteracao.length > 0 && (
+                      <button className="btn-ghost" style={{ width: "100%", marginTop: 8 }} onClick={() => irParaVideos(emAlteracao)}>
+                        {emAlteracao.length} em alteração
+                      </button>
+                    )}
+                  </div>
                   <div className="home-card">
                     <h4><Calendar size={14} /> Cronograma dos clientes</h4>
                     <AvisosCronograma itens={agenda} clientes={clientes} onAbrir={() => setAba("cronograma")} />
@@ -237,7 +281,14 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
                 )}
               </>
             ) : aba === "demandas" ? (
-              <Demandas trabalhos={trabalhos} corStatus={corStatus} onAbrir={setDemandaAberta} />
+              <Demandas
+                trabalhos={trabalhos}
+                corStatus={corStatus}
+                onAbrir={setDemandaAberta}
+                foco={focoDemandas}
+                ehSocial={ehSocial}
+                onResponder={(alvo, decisao) => setResposta({ alvo, decisao })}
+              />
             ) : aba === "cronograma" ? (
               <Calendario itens={agenda} clientes={clientes} podeEditar={ehSocial} onSalvar={acoes.salvarAgenda} onExcluir={acoes.excluirAgenda} />
             ) : aba === "recados" ? (
@@ -260,6 +311,8 @@ export default function PainelEquipe({ dados, onAtualizar, onFecharPrevia }) {
       )}
 
       {demanda && <DetalheDemanda d={demanda} corStatus={corStatus} onFechar={() => setDemandaAberta("")} />}
+
+      {resposta && <ResponderVideo {...resposta} onEnviar={acoes.responderVideo} onFechar={() => setResposta(null)} />}
     </div>
   );
 }
@@ -269,11 +322,14 @@ function SeloStatus({ nome, cor }) {
 }
 
 // Mesma tabela do painel do dono, sem edição.
-function Demandas({ trabalhos, corStatus, onAbrir }) {
+function Demandas({ trabalhos, corStatus, onAbrir, foco, ehSocial, onResponder }) {
   const [busca, setBusca] = useState("");
   const [mostrarFinalizadas, setMostrarFinalizadas] = useState(false);
   const [mostrarVideos, setMostrarVideos] = useState(false);
-  const [expandidas, setExpandidas] = useState(() => new Set());
+  const [expandidas, setExpandidas] = useState(() => new Set(foco));
+  useEffect(() => {
+    if (foco.length) setExpandidas((atual) => new Set([...atual, ...foco]));
+  }, [foco]);
   const lista = trabalhos.filter(
     (d) =>
       (mostrarFinalizadas || getUrgencia(d).tone !== "done") &&
@@ -321,11 +377,17 @@ function Demandas({ trabalhos, corStatus, onAbrir }) {
               const prog = videoProgress(d);
               const aberta = expandidas.has(d.id);
               const link = linkSeguro(d.link);
+              // Demanda sem lista de vídeos que espera resposta também abre, com uma linha própria.
+              const semVideos = !prog && videosComStatus([d], [STATUS_AGUARDANDO, STATUS_ALTERACAO]).length > 0;
+              const podeAbrir = !!prog || semVideos || !!d.retornoEm;
+              const linhas = prog
+                ? d.itens.map((v, i) => ({ id: v.id, itemId: v.id, nome: v.nome || "Vídeo " + (i + 1), status: v.status, prazo: v.dataEntrega || d.dataEntrega, link: v.link, retorno: v.retorno, retornoPor: v.retornoPor, retornoEm: v.retornoEm }))
+                : [{ id: d.id, itemId: "", nome: d.projeto, status: d.status, prazo: d.dataEntrega, link: "", retorno: d.retorno, retornoPor: d.retornoPor, retornoEm: d.retornoEm }];
               return (
                 <React.Fragment key={d.id}>
-                  <tr className={prog ? "clickable-row" : ""} onClick={() => prog && alternar(d.id)}>
+                  <tr className={podeAbrir ? "clickable-row" : ""} onClick={() => podeAbrir && alternar(d.id)}>
                     <td><span className="demand-drag-handle disabled" title={BLOQUEADO}><GripVertical size={14} /></span></td>
-                    <td>{prog && <span className="expand-btn" title="Ver vídeos">{aberta ? "▾" : "▸"}</span>}</td>
+                    <td>{podeAbrir && <span className="expand-btn" title="Ver vídeos">{aberta ? "▾" : "▸"}</span>}</td>
                     <td className="proj">
                       {d.projeto || "(sem nome)"}
                       {prog && <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>{prog.done}/{prog.total} vídeos</span>}
@@ -342,19 +404,32 @@ function Demandas({ trabalhos, corStatus, onAbrir }) {
                       </div>
                     </td>
                   </tr>
-                  {aberta && prog && (
+                  {aberta && podeAbrir && (
                     <tr className="video-subrow">
                       <td colSpan={8}>
                         <div className="video-sublist">
-                          {d.itens.map((v, idx) => {
-                            if (v.status === "Finalizada" && !mostrarVideos) return null;
-                            const unidade = unidadesDoTrabalho(d)[idx];
+                          {linhas.map((v) => {
+                            if (prog && v.status === "Finalizada" && !mostrarVideos) return null;
+                            const linkVideo = linkSeguro(v.link);
+                            const respondivel =
+                              ehSocial && d.status !== "Finalizada" && d.status !== "Standby" && (v.status === STATUS_AGUARDANDO || v.status === STATUS_ALTERACAO);
+                            const alvo = { demandaId: d.id, itemId: v.itemId, nome: v.nome };
                             return (
-                              <div key={v.id} className="video-subrow-item">
+                              <div key={v.id} className="video-subrow-item" style={{ background: `color-mix(in srgb, ${corStatus(v.status)} 14%, transparent)` }}>
                                 <span className="demand-drag-handle disabled" title={BLOQUEADO}><GripVertical size={14} /></span>
-                                <span className="video-subrow-name">{v.nome || "Vídeo " + (idx + 1)}</span>
-                                <span className="mono">{unidade.prazo ? dataCurta(unidade.prazo) : "sem prazo"}</span>
-                                <SeloStatus nome={unidade.status} cor={corStatus(unidade.status)} />
+                                <span className="video-subrow-name">{v.nome}</span>
+                                {linkVideo && (
+                                  <a className="btn-ghost eq-acao" href={linkVideo} target="_blank" rel="noopener noreferrer"><ExternalLink size={12} /> Abrir vídeo</a>
+                                )}
+                                <span className="mono">{v.prazo ? dataCurta(v.prazo) : "sem prazo"}</span>
+                                <SeloStatus nome={v.status} cor={corStatus(v.status)} />
+                                {respondivel && (
+                                  <span className="eq-respostas">
+                                    <button className="btn-ghost eq-acao ok" onClick={() => onResponder(alvo, "aprovar")}><Check size={12} /> Aprovar</button>
+                                    <button className="btn-ghost eq-acao ajuste" onClick={() => onResponder(alvo, "alterar")}><Pencil size={12} /> Pedir alteração</button>
+                                  </span>
+                                )}
+                                <Retorno status={v.status} retorno={v.retorno} retornoPor={v.retornoPor} retornoEm={v.retornoEm} />
                               </div>
                             );
                           })}
@@ -393,7 +468,7 @@ function DetalheDemanda({ d, corStatus, onFechar }) {
         <div className="tm-campo">
           <span>Vídeos</span>
           {d.itens.map((v, i) => (
-            <p className="tm-texto" key={v.id}>{v.nome || "Vídeo " + (i + 1)} — {unidadesDoTrabalho(d)[i].status}</p>
+            <p className="tm-texto" key={v.id}>{v.nome || "Vídeo " + (i + 1)} — {v.status}</p>
           ))}
         </div>
       )}
@@ -402,7 +477,52 @@ function DetalheDemanda({ d, corStatus, onFechar }) {
   );
 }
 
+function ResponderVideo({ alvo, decisao, onEnviar, onFechar }) {
+  const [comentario, setComentario] = useState("");
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const aprovar = decisao === "aprovar";
+
+  async function enviar(e) {
+    e.preventDefault();
+    if (!aprovar && !comentario.trim()) return;
+    setErro("");
+    setEnviando(true);
+    try {
+      await onEnviar({ demandaId: alvo.demandaId, itemId: alvo.itemId, decisao, comentario: comentario.trim() });
+      onFechar();
+    } catch (err) {
+      console.error("Falha ao responder o vídeo", err);
+      setErro(err?.message || "Não consegui enviar.");
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <Janela titulo={(aprovar ? "Aprovar: " : "Pedir alteração: ") + alvo.nome} onFechar={onFechar}>
+      <form onSubmit={enviar}>
+        <label className="tm-campo">
+          <span>{aprovar ? "Comentário (opcional)" : "O que precisa mudar"}</span>
+          <textarea style={{ minHeight: 120 }} value={comentario} maxLength={2000} onChange={(e) => setComentario(e.target.value)} autoFocus required={!aprovar} />
+        </label>
+        <p className="tm-linha-sub">A Fuzz e quem edita recebem um aviso.</p>
+        {erro && <p className="tm-erro">{erro}</p>}
+        <div className="tm-acoes">
+          <button type="button" className="tm-btn" onClick={onFechar}>Cancelar</button>
+          <button type="submit" className="tm-btn forte" disabled={enviando || (!aprovar && !comentario.trim())}>
+            {enviando ? "Enviando…" : aprovar ? "Confirmar aprovação" : "Enviar pedido"}
+          </button>
+        </div>
+      </form>
+    </Janela>
+  );
+}
+
 const CSS = `
+  .app .video-subrow-item .eq-acao { padding: 5px 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+  .app .eq-respostas { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .app .video-subrow-item .eq-acao.ok { border-color: #2f7a63; color: #7fdcbe; }
+  .app .video-subrow-item .eq-acao.ajuste { border-color: #8a4046; color: #ff9c93; }
   .app .eq-cadeado { margin-left: auto; opacity: 0.8; }
   .app .rail.collapsed .eq-cadeado { position: absolute; right: 3px; bottom: 3px; width: 9px; height: 9px; }
   .app button:disabled { cursor: default; }

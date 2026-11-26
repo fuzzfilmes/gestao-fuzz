@@ -5,12 +5,12 @@ function hojeLocalISO() {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
-// Status que vale pra um vídeo: a demanda marcada como Finalizada/Standby/Aguardando
-// aprovação vale pra todos os vídeos que ainda não foram finalizados.
+// Status que vale pra um vídeo: é o do próprio vídeo. Só a demanda Finalizada ou em
+// Standby vale pra todos os vídeos que ainda não foram finalizados. A aprovação é
+// sempre por vídeo, então o status "Aguardando aprovação" da demanda não é repassado.
 export function statusEfetivoDoItem(d, statusItem) {
   if (statusItem === "Finalizada" || d.status === "Finalizada") return "Finalizada";
   if (d.status === "Standby") return "Standby";
-  if (d.status === "Aguardando aprovação") return "Aguardando aprovação";
   return statusItem || "Não iniciada";
 }
 
@@ -37,10 +37,16 @@ export function unidadesDoTrabalho(d) {
   });
 }
 
+export const STATUS_AGUARDANDO = "Aguardando aprovação";
+export const STATUS_APROVADO = "Aprovado";
+export const STATUS_ALTERACAO = "Alteração solicitada";
+
 export function urgenciaDaUnidade(u) {
   if (u.status === "Finalizada") return { label: "Concluído", tone: "done" };
   if (u.status === "Standby") return { label: "StandBy", tone: "standby" };
   if (u.status === "Aguardando aprovação") return { label: "Aguardando cliente", tone: "wait" };
+  // Aprovado não atrasa mais, mas a demanda continua aberta até o dono finalizar.
+  if (u.status === STATUS_APROVADO) return { label: "Aprovado", tone: "approved" };
   if (!u.prazo) return { label: "Sem prazo", tone: "neutral" };
   const today = new Date(hojeLocalISO() + "T00:00:00");
   const entrega = new Date(u.prazo + "T00:00:00");
@@ -60,6 +66,8 @@ export function getUrgencia(d) {
   if (espera) return espera;
   const parada = urgencias.find((u) => u.tone === "standby");
   if (parada) return parada;
+  const aprovada = urgencias.find((u) => u.tone === "approved");
+  if (aprovada) return aprovada;
   return { label: "Concluído", tone: "done" };
 }
 
@@ -69,6 +77,7 @@ export const TONE_CLASS = {
   urgent: "badge-urgent",
   ok: "badge-ok",
   done: "badge-done",
+  approved: "badge-done",
   standby: "badge-standby",
   neutral: "badge-neutral",
 };
@@ -91,11 +100,33 @@ export function statsDeProducao(demandas) {
   let aguardando = 0;
   demandas.forEach((d) => {
     unidadesDoTrabalho(d).forEach((u) => {
-      if (u.status === "Finalizada" || u.status === "Standby") return;
+      if (u.status === "Finalizada" || u.status === "Standby" || u.status === STATUS_APROVADO) return;
       if (u.status === "Aguardando aprovação") { aguardando++; return; }
       if (urgenciaDaUnidade(u).tone === "late") atrasado++;
       if (u.status === "Em andamento" || (ehNaoIniciado(u.status) && d.status === "Em andamento")) emAndamento++;
     });
   });
   return { emAndamento, atrasado, aguardando };
+}
+
+// Vídeos (ou demandas sem vídeos) que estão num dos status pedidos, pelo status que
+// aparece na lista. Demandas finalizadas ou em standby ficam de fora.
+export function videosComStatus(demandas, statusAceitos) {
+  const lista = [];
+  demandas.forEach((d) => {
+    if (d.status === "Finalizada" || d.status === "Standby") return;
+    const itens = d.itens || [];
+    if (itens.length === 0) {
+      if (statusAceitos.includes(d.status)) {
+        lista.push({ demanda: d, itemId: "", nome: d.projeto, status: d.status, prazo: d.dataEntrega || "", link: d.link || "", retorno: d.retorno || "", retornoPor: d.retornoPor || "" });
+      }
+      return;
+    }
+    itens.forEach((it, i) => {
+      if (statusAceitos.includes(it.status)) {
+        lista.push({ demanda: d, itemId: it.id, nome: it.nome || "Vídeo " + (i + 1), status: it.status, prazo: it.dataEntrega || d.dataEntrega || "", link: it.link || d.link || "", retorno: it.retorno || "", retornoPor: it.retornoPor || "" });
+      }
+    });
+  });
+  return lista;
 }

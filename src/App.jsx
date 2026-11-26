@@ -3,11 +3,15 @@ import { statusEfetivoDoItem, unidadesDoTrabalho, urgenciaDaUnidade, getUrgencia
 import { APP_CSS } from "./appStyle.js";
 import { MENU } from "./equipe/menu.js";
 import { AlternarVisao, ListaClientes, CamposCliente } from "./equipe/Clientes.jsx";
+import { linkSeguro } from "./equipe/util.js";
 import EquipeAcessos from "./EquipeAcessos.jsx";
 import Calendario from "./equipe/Calendario.jsx";
 import AvisosCronograma from "./equipe/Avisos.jsx";
 import Recados, { Recado, recadosNaoLidos } from "./equipe/Recados.jsx";
 import MateriaisCliente from "./equipe/MateriaisCliente.jsx";
+import Retorno from "./equipe/Retorno.jsx";
+import { AprovarProposta, RecusarProposta, EditarProposta } from "./PropostaModais.jsx";
+import { FORMAS_PAGAMENTO, vinculosDaProposta } from "./lib/propostas.js";
 import Janela from "./equipe/Janela.jsx";
 import { calcularPainelFinanceiro, ehProLabore, proLaboreTotalDoMes, CATEGORIA_SEM } from "./lib/financeiro.js";
 import { Film, Users, Plus, Pencil, Trash2, X, AlertTriangle, Clock, CheckCircle2, PauseCircle, ExternalLink, Archive, FileText, Calculator, CheckCircle, DollarSign, Settings, LayoutGrid, ChevronLeft, ChevronRight, GripVertical, Target, Search, Bell, CreditCard, TrendingUp, Wallet, Eye, EyeOff, Camera, Image as ImageIcon, Home, Wrench, Package, LogOut, Download, Copy, Calendar, FileSignature, Filter, StickyNote, PiggyBank, MessageCircle, NotebookText, MoreHorizontal } from "lucide-react";
@@ -1464,6 +1468,10 @@ export default function App() {
   const clientViewInfoRef = useRef(clientViewInfo);
   clientsRef.current = clients;
   demandsRef.current = demands;
+  const salvandoDemandas = useRef(0);
+  const propostaParaReabrirRef = useRef(null);
+  const [propostaModal, setPropostaModal] = useState(null); // { tipo: 'aprovar'|'recusar'|'editar', id }
+  const demandFormAberto = useRef(false);
   proposalsRef.current = proposals;
   transacoesRef.current = transacoes;
   notasReuniaoRef.current = notasReuniao;
@@ -1548,10 +1556,12 @@ export default function App() {
               payload: {
                 proximoNumero: computeProximoNumeroProposta(),
                 clientes: clientsRef.current,
+                editar: propostaParaReabrirRef.current,
               },
             },
             "*"
           );
+          propostaParaReabrirRef.current = null;
         }
         return;
       }
@@ -1671,22 +1681,31 @@ export default function App() {
           // tentar gravar antes do cliente novo existir no banco e falhar silenciosamente.
           await persistClients(clientList);
 
-          const novaProposta = {
-            id: "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+          // Reaberta ou já salva nesta tela: atualiza a mesma proposta em vez de duplicar.
+          const existente = p.propostaId ? proposalsRef.current.find((x) => x.id === p.propostaId) : null;
+          const guardaCompleta =
+            proposalsRef.current.some((x) => x.dados !== undefined) || transacoesRef.current.some((t) => t.propostaId !== undefined);
+          const campos = {
             numero: p.numero,
             titulo: p.titulo || "Proposta sem título",
             tipo: p.tipo || DEFAULT_TIPOS[0],
             clienteId: clientId,
             clienteNome: nomeCliente,
             valorTotal: p.valorTotal || 0,
-            dataGeracao: todayISO(),
-            status: "Pendente",
+            ...(guardaCompleta && { dados: p.dados }),
           };
-          await persistProposals([novaProposta, ...proposalsRef.current]);
+          const proposta = existente
+            ? { ...existente, ...campos }
+            : { id: "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), ...campos, dataGeracao: todayISO(), status: "Pendente" };
+          await persistProposals(
+            existente ? proposalsRef.current.map((x) => (x.id === proposta.id ? proposta : x)) : [proposta, ...proposalsRef.current]
+          );
+          if (ev.source) ev.source.postMessage({ type: "fuzz:proposta-salva", payload: { id: proposta.id } }, "*");
 
           setToast(
-            (match ? "Cliente atualizado" : "Cliente criado") +
-              ": " + nomeCliente + " · proposta nº " + p.numero + " adicionada em Propostas."
+            existente
+              ? "Proposta nº " + p.numero + " atualizada." + (existente.status === "Confirmada" ? " A demanda e as receitas já criadas não mudam sozinhas." : "")
+              : (match ? "Cliente atualizado" : "Cliente criado") + ": " + nomeCliente + " · proposta nº " + p.numero + " adicionada em Propostas."
           );
           setTimeout(() => setToast(null), 6000);
         } catch (e) {
@@ -1710,44 +1729,105 @@ export default function App() {
     }
   }
 
-  function confirmarProposta(prop) {
-    const maiorOrdem = demandsRef.current.reduce((max, x) => Math.max(max, x.ordem || 0), 0);
-    const novaDemanda = {
-      ...emptyDemand(),
-      projeto: prop.titulo,
-      clienteId: prop.clienteId,
-      tipo: prop.tipo,
-      ordem: maiorOrdem + 10,
-      observacoes: "Gerada a partir da Proposta nº " + prop.numero + (prop.valorTotal ? " — valor: R$ " + prop.valorTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""),
-    };
-    persistDemands([...demandsRef.current, novaDemanda]);
-    persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Confirmada", dataConfirmacao: todayISO() } : p)));
+  function avisar(texto) {
+    setToast(texto);
+    setTimeout(() => setToast(null), 6000);
+  }
+
+  // false enquanto a migração 029 não for rodada
+  const temColunasProposta = proposals.some((p) => p.dados !== undefined) || transacoes.some((t) => t.propostaId !== undefined);
+
+  async function aprovarProposta(prop, { criarDemanda, receitas, forma }) {
+    setPropostaModal(null);
+    let demandaId = vinculosDaProposta(prop, demandsRef.current, transacoesRef.current).demandas[0]?.id || "";
+    if (criarDemanda) {
+      const maiorOrdem = demandsRef.current.reduce((max, x) => Math.max(max, x.ordem || 0), 0);
+      const novaDemanda = {
+        ...emptyDemand(),
+        projeto: prop.titulo,
+        clienteId: prop.clienteId,
+        tipo: prop.tipo,
+        ordem: maiorOrdem + 10,
+        observacoes: "Gerada a partir da Proposta nº " + prop.numero + (prop.valorTotal ? " — valor: R$ " + prop.valorTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""),
+      };
+      demandaId = novaDemanda.id;
+      // A receita aponta pra demanda, então a demanda precisa ser salva primeiro.
+      await persistDemands([...demandsRef.current, novaDemanda]);
+    }
+
+    await persistProposals(
+      proposalsRef.current.map((p) =>
+        p.id === prop.id ? { ...p, status: "Confirmada", dataConfirmacao: todayISO(), ...(temColunasProposta && { demandaId }) } : p
+      )
+    );
 
     const clienteVinculado = clientsRef.current.find((c) => c.id === prop.clienteId);
     if (clienteVinculado && clienteVinculado.rascunho) {
       persistClients(clientsRef.current.map((c) => (c.id === prop.clienteId ? { ...c, rascunho: false } : c)));
     }
 
-    if (prop.valorTotal) {
-      const novaReceita = {
+    if (receitas.length > 0) {
+      const grupo = receitas.length > 1 ? "grp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6) : "";
+      const novas = receitas.map((valor, i) => ({
         ...emptyTransacao("Receita"),
+        id: "t_" + Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 5),
         descricao: prop.titulo,
-        valor: String(prop.valorTotal),
-        data: "",
-        demandaId: novaDemanda.id,
+        valor: String(parseFloat(valor)),
+        data: "", // fica aguardando o dono confirmar quando será paga
+        demandaId,
         clienteId: prop.clienteId,
         tipoReceita: tiposReceita[0] || "",
         observacoes: "Gerada automaticamente a partir da Proposta nº " + prop.numero,
-      };
-      persistTransacoes([...transacoesRef.current, novaReceita]);
+        parcelaGrupoId: grupo,
+        parcelaAtual: grupo ? i + 1 : null,
+        parcelaTotal: grupo ? receitas.length : null,
+        ...(temColunasProposta && { formaPagamento: forma, propostaId: prop.id }),
+      }));
+      await persistTransacoes([...transacoesRef.current, ...novas]);
     }
 
-    setToast("Proposta confirmada: demanda \"" + prop.titulo + "\" criada em Demandas" + (prop.valorTotal ? " e receita lançada em Financeiro." : "."));
-    setTimeout(() => setToast(null), 6000);
+    const partes = [criarDemanda ? "demanda criada" : "", receitas.length ? (receitas.length === 1 ? "receita aguardando data" : receitas.length + " parcelas aguardando data") : ""].filter(Boolean);
+    avisar("Proposta aprovada" + (partes.length ? ": " + partes.join(" e ") + "." : "."));
   }
 
-  function recusarProposta(prop) {
-    persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? { ...p, status: "Recusada" } : p)));
+  async function recusarProposta(prop, apagar = { demandas: [], receitas: [] }) {
+    setPropostaModal(null);
+    if (apagar.receitas.length > 0 || apagar.demandas.length > 0) {
+      // Receitas recebidas nunca são apagadas. O que ficar ligado a uma demanda apagada solta a ligação.
+      await persistTransacoes(
+        transacoesRef.current
+          .filter((t) => !(apagar.receitas.includes(t.id) && t.statusPagamento !== "Pago"))
+          .map((t) => (apagar.demandas.includes(t.demandaId) ? { ...t, demandaId: "" } : t))
+      );
+    }
+    if (apagar.demandas.length > 0) {
+      await persistDemands(demandsRef.current.filter((d) => !apagar.demandas.includes(d.id)));
+    }
+    await persistProposals(
+      proposalsRef.current.map((p) =>
+        p.id === prop.id
+          ? { ...p, status: "Recusada", dataConfirmacao: "", ...(apagar.demandas.includes(p.demandaId) && { demandaId: "" }) }
+          : p
+      )
+    );
+    const total = apagar.demandas.length + apagar.receitas.length;
+    avisar("Proposta recusada" + (total ? " e " + total + (total === 1 ? " item apagado." : " itens apagados.") : "."));
+  }
+
+  function salvarDadosProposta(prop) {
+    setPropostaModal(null);
+    persistProposals(proposalsRef.current.map((p) => (p.id === prop.id ? prop : p)));
+  }
+
+  function reabrirProposta(prop) {
+    propostaParaReabrirRef.current = { id: prop.id, dados: prop.dados };
+    setPropostaModal(null);
+    setClientViewInfo(null);
+    setTab("propostas");
+  }
+
+  function definirVencimento(t, data) {
+    persistTransacoes(transacoesRef.current.map((x) => (x.id === t.id ? { ...x, data } : x)));
   }
 
   function removeProposal(id) {
@@ -2301,10 +2381,13 @@ export default function App() {
   async function persistDemands(list) {
     const prev = demandsRef.current;
     setDemands(list);
+    salvandoDemandas.current += 1;
     try {
       await api.syncDemandas(prev, list);
     } catch (e) {
       console.error("Falha ao salvar demandas", e);
+    } finally {
+      salvandoDemandas.current -= 1;
     }
   }
 
@@ -2357,24 +2440,41 @@ export default function App() {
     }
   }
 
+  // Traz as aprovações da equipe. Não mexe na lista enquanto há algo sendo salvo ou o
+  // formulário de demanda está aberto, pra não sobrepor o que está sendo editado.
+  async function atualizarDemandas() {
+    if (salvandoDemandas.current > 0 || demandFormAberto.current) return;
+    const antes = demandsRef.current;
+    try {
+      const lista = await api.listDemandas();
+      if (salvandoDemandas.current > 0 || demandFormAberto.current || demandsRef.current !== antes) return;
+      if (JSON.stringify(lista) !== JSON.stringify(antes)) setDemands(lista);
+    } catch (e) {
+      console.error("Falha ao atualizar demandas", e);
+    }
+  }
+
   // A equipe grava coisas enquanto o painel está aberto: atualiza ao voltar pra aba e a cada minuto.
   useEffect(() => {
     if (loading) return undefined;
     async function atualizar() {
       carregarColaboracao();
+      atualizarDemandas();
       try {
         setNotasReuniao(await api.listNotasReuniao());
       } catch (e) {
         console.error("Falha ao atualizar notas de reunião", e);
       }
     }
-    const timer = setInterval(carregarColaboracao, 60000);
+    const timer = setInterval(() => { carregarColaboracao(); atualizarDemandas(); }, 60000);
     window.addEventListener("focus", atualizar);
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", atualizar);
     };
   }, [loading]);
+
+  demandFormAberto.current = !!demandForm;
 
   const gravarColab = (fn) => async (arg) => {
     await fn(arg);
@@ -2398,6 +2498,23 @@ export default function App() {
   const recadosNovos = recadosNaoLidos(meusRecados);
   const pessoasRecado = equipeMembros.filter((m) => m.ativo).map((m) => ({ id: m.id, nome: m.nome }));
   const clientesAtivos = clients.filter((c) => !c.rascunho);
+
+  // Define de uma vez quais demandas ficam com uma pessoa (tela Equipe e acessos).
+  async function atribuirDemandas(membroId, nome, ids) {
+    let mudou = false;
+    const lista = demandsRef.current.map((d) => {
+      if (ids.includes(d.id) && d.editorMembroId !== membroId) {
+        mudou = true;
+        return { ...d, editorMembroId: membroId, editor: d.editor || nome };
+      }
+      if (!ids.includes(d.id) && d.editorMembroId === membroId) {
+        mudou = true;
+        return { ...d, editorMembroId: "" };
+      }
+      return d;
+    });
+    if (mudou) await persistDemands(lista);
+  }
 
   // O banco já solta a atribuição ao excluir um acesso; aqui só acompanha na tela.
   function soltarDemandasDoMembro(membroId) {
@@ -2835,6 +2952,8 @@ export default function App() {
   }, [relatorioDemandasDoMes, relatorioDemandaClienteFiltro, relatorioDemandaTipoFiltro]);
 
   const stats = useMemo(() => statsDeProducao(demands), [demands]);
+  // false enquanto a migração 028 não for rodada (a coluna ainda não existe)
+  const temLinkPorVideo = demands.some((d) => (d.itens || []).some((it) => it.link !== undefined));
 
   const demandasStatsMes = useMemo(() => {
     let total = 0;
@@ -2888,7 +3007,7 @@ export default function App() {
         label: "Ver demandas",
       });
     }
-    const unidadeHoje = (u) => u.prazo === todayISO() && u.status !== "Finalizada";
+    const unidadeHoje = (u) => u.prazo === todayISO() && u.status !== "Finalizada" && u.status !== "Aprovado";
     const demandasHoje = demands.filter((d) => unidadesDoTrabalho(d).some(unidadeHoje));
     if (demandasHoje.length > 0) {
       list.push({
@@ -3643,6 +3762,7 @@ export default function App() {
                             </td>
                             <td className="proj">
                               {d.projeto || "(sem nome)"}
+                              {!prog && <Retorno status={d.status} retorno={d.retorno} retornoPor={d.retornoPor} retornoEm={d.retornoEm} />}
                               {prog && (
                                 <span className="badge badge-neutral" style={{ marginLeft: 8, fontWeight: 500 }}>
                                   {prog.done}/{prog.total} vídeos
@@ -3695,6 +3815,22 @@ export default function App() {
                                           <GripVertical size={14} />
                                         </span>
                                         <span className="video-subrow-name">{v.nome || "Vídeo " + (idx + 1)}</span>
+                                        {v.link !== undefined && (
+                                          <>
+                                            <input
+                                              key={v.link}
+                                              className="video-link"
+                                              defaultValue={v.link}
+                                              placeholder="Link do vídeo"
+                                              onClick={(e) => e.stopPropagation()}
+                                              onBlur={(e) => { if (e.target.value.trim() !== v.link) updateVideoField(d.id, v.id, "link", e.target.value.trim()); }}
+                                              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                                            />
+                                            {linkSeguro(v.link) && (
+                                              <a className="icon-btn" href={linkSeguro(v.link)} target="_blank" rel="noopener noreferrer" title="Abrir vídeo"><ExternalLink size={13} /></a>
+                                            )}
+                                          </>
+                                        )}
                                         <input
                                           type="date"
                                           value={v.dataEntrega || ""}
@@ -3710,6 +3846,7 @@ export default function App() {
                                         >
                                           {statusDemandas.map((s) => <option key={s.id} value={s.nome}>{s.nome}</option>)}
                                         </select>
+                                        <Retorno status={v.status} retorno={v.retorno} retornoPor={v.retornoPor} retornoEm={v.retornoEm} />
                                       </div>
                                     );
                                   })}
@@ -3896,12 +4033,26 @@ export default function App() {
                           </td>
                           <td>
                             <div className="row-actions">
-                              {p.status === "Pendente" && (
-                                <>
-                                  <button className="icon-btn" title="Confirmar proposta" onClick={() => confirmarProposta(p)}><CheckCircle2 size={13} /></button>
-                                  <button className="icon-btn" title="Recusar proposta" onClick={() => recusarProposta(p)}><X size={13} /></button>
-                                </>
+                              {p.status !== "Confirmada" && (
+                                <button className="icon-btn" title="Aprovar proposta" onClick={() => setPropostaModal({ tipo: "aprovar", id: p.id })}><CheckCircle2 size={13} /></button>
                               )}
+                              {p.status !== "Recusada" && (
+                                <button
+                                  className="icon-btn"
+                                  title="Recusar proposta"
+                                  onClick={() => (p.status === "Confirmada" ? setPropostaModal({ tipo: "recusar", id: p.id }) : recusarProposta(p))}
+                                >
+                                  <X size={13} />
+                                </button>
+                              )}
+                              {/* Com o texto salvo, editar é no gerador (lista e PDF nunca divergem). */}
+                              <button
+                                className="icon-btn"
+                                title={p.dados ? "Editar no gerador / baixar PDF" : "Editar dados da proposta"}
+                                onClick={() => (p.dados ? reabrirProposta(p) : setPropostaModal({ tipo: "editar", id: p.id }))}
+                              >
+                                <Pencil size={13} />
+                              </button>
                               <button
                                 className="icon-btn"
                                 title="Importar para contrato"
@@ -3943,6 +4094,11 @@ export default function App() {
               const pagasDespesas = finDespesasLista.filter((t) => t.statusPagamento === "Pago");
               const aPagarDespesas = finDespesasLista.filter((t) => t.statusPagamento !== "Pago");
               const somaLista = (l) => l.reduce((s, t) => s + (parseFloat(t.valor) || 0), 0);
+              // Sem vencimento não entra em nenhum mês: fica visível aqui, em qualquer mês, até receber data.
+              const semData = transacoes
+                .filter((t) => !t.data && (!financeClienteFilter || t.clienteId === financeClienteFilter))
+                .sort((a, b) => (a.descricao || "").localeCompare(b.descricao || "", "pt-BR") || (a.parcelaAtual || 0) - (b.parcelaAtual || 0));
+              const totalSemData = (tipo) => semData.filter((t) => t.tipo === tipo && t.statusPagamento !== "Pago").reduce((acc, t) => acc + (parseFloat(t.valor) || 0), 0);
               const abrirExcluir = (t) => setConfirmDelete({ type: "transacao", id: t.id, label: t.descricao, parcelaGrupoId: t.parcelaGrupoId });
               const transacaoPorId = (id) => transacoes.find((x) => x.id === id);
 
@@ -4011,6 +4167,7 @@ export default function App() {
                         {receita ? (
                           <>
                             {partesSub.length > 0 && <span>{partesSub.join(" · ")}</span>}
+                            {t.formaPagamento && <span>{partesSub.length > 0 ? "· " : ""}{t.formaPagamento}</span>}
                             {!retirada && (
                               <button
                                 type="button"
@@ -4125,6 +4282,50 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  {semData.length > 0 && (
+                    <div className="fz-card fz-espera">
+                      <div className="fz-card-title fz-card-title-row">
+                        <span>Aguardando data de pagamento</span>
+                        <span className="fz-total">
+                          {totalSemData("Receita") > 0 && <span className="in">{brl(totalSemData("Receita"))} a receber</span>}
+                          {totalSemData("Despesa") > 0 && <span className="out"> · {brl(totalSemData("Despesa"))} a pagar</span>}
+                        </span>
+                      </div>
+                      <p className="fz-hint" style={{ margin: "-6px 0 6px" }}>Informe o vencimento para entrar na conta do mês. Até lá, esses valores não aparecem no topo nem na agenda.</p>
+                      <div className="fz-list">
+                        {semData.map((t) => {
+                          const receita = t.tipo === "Receita";
+                          const detalhes = [
+                            clientName(t.clienteId) !== "—" ? clientName(t.clienteId) : "",
+                            t.parcelaGrupoId ? "parcela " + t.parcelaAtual + "/" + t.parcelaTotal : "",
+                            t.formaPagamento || "",
+                            !receita ? "despesa" : "",
+                            t.statusPagamento === "Pago" ? (receita ? "marcada como recebida" : "marcada como paga") : "",
+                          ].filter(Boolean).join(" · ");
+                          return (
+                            <form
+                              key={t.id}
+                              className="fz-wrow"
+                              onSubmit={(e) => { e.preventDefault(); const v = e.currentTarget.elements.vencimento.value; if (v) definirVencimento(t, v); }}
+                            >
+                              <div className="fz-lmain">
+                                <p className="fz-ttl">{t.descricao || "(sem descrição)"}</p>
+                                {detalhes && <p className="fz-sub">{detalhes}</p>}
+                              </div>
+                              <div className={"fz-lvalor " + (receita ? "in" : "out")}>{brl(parseFloat(t.valor) || 0)}</div>
+                              <input type="date" name="vencimento" aria-label="Vencimento" required />
+                              <button type="submit" className="fz-alert-btn">Confirmar data</button>
+                              <span className="fz-wacoes">
+                                <button type="button" className="icon-btn" onClick={() => setTransacaoForm(t)} title="Editar"><Pencil size={13} /></button>
+                                <button type="button" className="icon-btn" onClick={() => abrirExcluir(t)} title="Excluir"><Trash2 size={13} /></button>
+                              </span>
+                            </form>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Agenda + atenção */}
                   <div className="fz-row-2">
@@ -4833,6 +5034,7 @@ export default function App() {
                 agenda={agendaCliente}
                 erroCarga={equipeErro}
                 onRecarregar={carregarEquipe}
+                onAtribuir={atribuirDemandas}
                 onExcluido={soltarDemandasDoMembro}
                 onVoltar={() => setConfigSecaoAtiva(null)}
               />
@@ -5488,6 +5690,17 @@ export default function App() {
                   >
                     <X size={13} />
                   </button>
+                  {temLinkPorVideo && (
+                    <input
+                      className="video-item-link"
+                      value={v.link || ""}
+                      placeholder="Link deste vídeo (para aprovação)"
+                      onChange={(e) => {
+                        const itens = demandForm.itens.map((it, i) => (i === idx ? { ...it, link: e.target.value } : it));
+                        setDemandForm({ ...demandForm, itens });
+                      }}
+                    />
+                  )}
                 </div>
               ))}
               <button
@@ -5605,6 +5818,23 @@ export default function App() {
               <button className="icon-btn" onClick={() => setClientViewInfo(null)}><X size={15} /></button>
             </h3>
             <CamposCliente cliente={clientViewInfo} />
+            {proposals.some((p) => p.clienteId === clientViewInfo.id) && (
+              <div className="field">
+                <label>Propostas</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {proposals.filter((p) => p.clienteId === clientViewInfo.id).map((p) => (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span>nº {p.numero || "—"} · {p.titulo} <span style={{ fontSize: 12, color: "var(--text-dim)" }}>· R$ {Number(p.valorTotal || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} · {p.status}</span></span>
+                      {p.dados ? (
+                        <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12, flexShrink: 0 }} onClick={() => reabrirProposta(p)}>Abrir / PDF</button>
+                      ) : (
+                        <span style={{ fontSize: 11.5, color: "var(--text-dim)", flexShrink: 0 }} title="Salva antes de o painel guardar o texto completo">sem texto salvo</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {clientArquivos.length > 0 && (
               <div className="field">
                 <label>Arquivos anexados</label>
@@ -5670,6 +5900,22 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {propostaModal && proposals.find((p) => p.id === propostaModal.id) && (() => {
+        const prop = proposals.find((p) => p.id === propostaModal.id);
+        const comum = { proposta: prop, demandas: demands, transacoes, onFechar: () => setPropostaModal(null) };
+        if (propostaModal.tipo === "aprovar") return <AprovarProposta {...comum} comPagamento={temColunasProposta} onConfirmar={(o) => aprovarProposta(prop, o)} />;
+        if (propostaModal.tipo === "recusar") return <RecusarProposta {...comum} onConfirmar={(apagar) => recusarProposta(prop, apagar)} />;
+        return (
+          <EditarProposta
+            proposta={prop}
+            clientes={clients}
+            tipos={tiposProducao}
+            onSalvar={salvarDadosProposta}
+            onFechar={() => setPropostaModal(null)}
+          />
+        );
+      })()}
 
       {cronogramaAberto && (
         <Janela
@@ -5962,6 +6208,15 @@ export default function App() {
               </div>
             )}
             <div className="grid2">
+              {temColunasProposta && transacaoForm.tipo === "Receita" && (
+                <div className="field">
+                  <label>Forma de pagamento</label>
+                  <select value={transacaoForm.formaPagamento || ""} onChange={(e) => setTransacaoForm({ ...transacaoForm, formaPagamento: e.target.value })}>
+                    <option value="">Não informada</option>
+                    {FORMAS_PAGAMENTO.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label>Status</label>
                 <select value={transacaoForm.statusPagamento} onChange={(e) => setTransacaoForm({ ...transacaoForm, statusPagamento: e.target.value })}>

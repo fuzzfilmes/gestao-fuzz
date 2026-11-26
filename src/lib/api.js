@@ -187,6 +187,8 @@ function itemToRow(demandaId, it, ordem) {
     status: it.status || "Não iniciado",
     data_entrega: n(it.dataEntrega),
     data_conclusao: n(it.dataConclusao),
+    // só envia o link quando a coluna existe no banco (migração 028)
+    ...(it.link !== undefined && { link: it.link }),
     ordem,
   };
 }
@@ -203,6 +205,9 @@ function demandaFromRow(r, itensByDemanda) {
     dataEnvioAprovacao: r.data_envio_aprovacao || "",
     dataAprovacao: r.data_aprovacao || "",
     link: r.link,
+    retorno: r.retorno || "",
+    retornoPor: r.retorno_por || "",
+    retornoEm: r.retorno_em || "",
     observacoes: r.observacoes,
     ordem: r.ordem || 0,
     itens: (itensByDemanda.get(r.id) || []).map((it) => ({
@@ -211,6 +216,11 @@ function demandaFromRow(r, itensByDemanda) {
       status: it.status || "Não iniciado",
       dataEntrega: it.data_entrega || "",
       dataConclusao: it.data_conclusao || "",
+      link: it.link === undefined ? undefined : it.link || "",
+      // retorno da aprovação: gravado só pelo banco, aqui é apenas leitura
+      retorno: it.retorno || "",
+      retornoPor: it.retorno_por || "",
+      retornoEm: it.retorno_em || "",
     })),
   };
 }
@@ -259,6 +269,9 @@ function propostaToRow(p) {
     data_geracao: n(p.dataGeracao),
     data_confirmacao: n(p.dataConfirmacao),
     status: p.status || "Pendente",
+    // colunas da migração 029: só são enviadas quando existem no banco
+    ...(p.dados !== undefined && { dados: p.dados }),
+    ...(p.demandaId !== undefined && { demanda_id: n(p.demandaId) }),
   };
 }
 function propostaFromRow(r) {
@@ -273,6 +286,8 @@ function propostaFromRow(r) {
     dataGeracao: r.data_geracao,
     dataConfirmacao: r.data_confirmacao || "",
     status: r.status,
+    dados: r.dados === undefined ? undefined : r.dados,
+    demandaId: r.demanda_id === undefined ? undefined : r.demanda_id || "",
   };
 }
 export async function listPropostas() {
@@ -353,6 +368,9 @@ function transacaoToRow(t) {
     parcela_total: t.parcelaTotal != null ? t.parcelaTotal : null,
     nota_emitida: !!t.notaEmitida,
     data_nota_emitida: n(t.dataNotaEmitida),
+    // colunas da migração 029: só são enviadas quando existem no banco
+    ...(t.formaPagamento !== undefined && { forma_pagamento: t.formaPagamento || null }),
+    ...(t.propostaId !== undefined && { proposta_id: n(t.propostaId) }),
   };
 }
 function transacaoFromRow(r) {
@@ -374,6 +392,8 @@ function transacaoFromRow(r) {
     parcelaTotal: r.parcela_total,
     notaEmitida: !!r.nota_emitida,
     dataNotaEmitida: r.data_nota_emitida || "",
+    formaPagamento: r.forma_pagamento === undefined ? undefined : r.forma_pagamento || "",
+    propostaId: r.proposta_id === undefined ? undefined : r.proposta_id || "",
   };
 }
 export async function listTransacoes() {
@@ -781,6 +801,7 @@ export async function criarEquipeMembro({ nome, email, papel, clientesIds }) {
 export async function atualizarEquipeMembro(id, campos) {
   const row = {};
   if ("nome" in campos) row.nome = campos.nome.trim();
+  if ("papel" in campos) row.papel = campos.papel;
   if ("ativo" in campos) row.ativo = campos.ativo;
   if ("clientesIds" in campos) row.clientes_ids = campos.clientesIds;
   throwIfError(await supabase.from("equipe_membros").update(row).eq("id", id));
@@ -876,4 +897,7 @@ export async function equipeExcluirNota(id) {
 }
 export async function equipeEnviarRecado(recado) {
   throwIfError(await supabase.rpc("equipe_enviar_recado", { p: recado }));
+}
+export async function equipeResponderVideo(resposta) {
+  throwIfError(await supabase.rpc("equipe_responder_video", { p: resposta }));
 }
